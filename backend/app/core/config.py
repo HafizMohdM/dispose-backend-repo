@@ -1,0 +1,6 @@
+import os
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change_me")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_HOURS = os.getenv("JWT_EXPIRE_HOURS", 24)
+JWT_EXPIRE_MINUTES = os.getenv("JWT_EXPIRE_MINUTES", 15)

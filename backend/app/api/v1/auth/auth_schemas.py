@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+from pydantic import BaseModel,EmailStr
+from typing import Optional
 
 class RequestOTP(BaseModel):
     mobile: str
@@ -6,3 +7,7 @@ class RequestOTP(BaseModel):
 class VerifyOTP(BaseModel):
     mobile: str
     otp: str
+
+class UpdateProfileRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    

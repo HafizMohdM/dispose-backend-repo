@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.api.v1.auth.auth_schemas import RequestOTP, VerifyOTP
+from app.api.v1.auth.auth_schemas import RequestOTP, VerifyOTP, UpdateProfileRequest
 from app.api.v1.auth.auth_service import request_otp, verify_otp
 from app.core.database import SessionLocal
 
 from app.core.dependencies import get_current_user,get_db
+from app.core.security import create_access_token
 
 from app.core.security import create_access_token
 
-from app.models.user import User
+from app.models.user import User , UserSession
 from app.models.role import Role
 from app.models.role_mapping import UserRole
 from app.models.organization import Organization
@@ -120,3 +121,148 @@ def select_organization(
         "role": role.name
     }
 
+@router.post("/logout")
+def logout(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Logout current user by invalidating all active sessions
+    """
+
+    db.query(UserSession).filter(
+        UserSession.user_id == current_user.id
+    ).delete()
+
+    db.commit()
+
+    return {
+        "message": "Logged out successfully"
+    }
+
+@router.post("/refresh-token")
+def refresh_token(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Issue a new JWT using current tenant context
+    """
+
+    if not current_user.current_org_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Organization context missing"
+        )
+
+    new_token = create_access_token({
+        "user_id": current_user.id,
+        "org_id": current_user.current_org_id,
+        "role": current_user.current_role,
+    })
+
+    return {
+        "access_token": new_token,
+        "token_type": "bearer",
+        "org_id": current_user.current_org_id,
+        "role": current_user.current_role,
+    }
+
+@router.get("/profile")
+def get_profile(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns authenticated user's profile and current tenant context
+    """
+
+    return {
+        "user": {
+            "id": current_user.id,
+            "mobile": current_user.mobile,
+            "email": current_user.email,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at,
+            "updated_at": current_user.updated_at,
+        },
+        "tenant": {
+            "org_id": current_user.current_org_id,
+            "role": current_user.current_role,
+        }
+    }
+
+@router.patch("/profile")
+def update_profile(
+    payload: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update user's profile fields safely
+    """
+
+    if payload.email is not None:
+        current_user.email = payload.email
+
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "message": "Profile updated successfully",
+        "user": {
+            "id": current_user.id,
+            "mobile": current_user.mobile,
+            "email": current_user.email,
+            "is_active": current_user.is_active,
+            "updated_at": current_user.updated_at,
+        }
+    }
+
+@router.post("/deactivate-account")
+def deactivate_account(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Soft deactivate user account
+    """
+
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Account already inactive"
+        )
+
+    current_user.is_active = False
+
+    # also revoke all sessions
+    db.query(UserSession).filter(
+        UserSession.user_id == current_user.id
+    ).delete()
+
+    db.commit()
+
+    return {
+        "message": "Account deactivated successfully"
+    }
+
+@router.post("/logout-all-devices")
+def logout_all_devices(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Logout user from all devices by deleting all session records
+    """
+
+    deleted = (
+        db.query(UserSession)
+        .filter(UserSession.user_id == current_user.id)
+        .delete()
+    )
+
+    db.commit()
+
+    return {
+        "message": "Logged out from all devices successfully",
+        "sessions_revoked": deleted
+    }

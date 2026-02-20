@@ -26,7 +26,10 @@ def get_current_user(
 
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+
         user_id = payload.get("user_id")
+        org_id = payload.get("org_id")
+        role = payload.get("role")
 
         if user_id is None:
             raise HTTPException(
@@ -47,5 +50,14 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+    
+    # CRITICAL: attach tenant context to user object
+    user.current_org_id = org_id
+    user.current_role = role
 
     return user

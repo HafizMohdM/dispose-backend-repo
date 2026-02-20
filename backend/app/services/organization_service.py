@@ -14,19 +14,19 @@ class OrganizationService:
             raise HTTPException(status_code=409, detail="Organization already exists")
 
         org = Organization(
-    name=data.name,
-    description=data.description,
-    category_id=data.category_id,
-    address=data.address,
-    city=data.city,
-    state=data.state,
-    pincode=data.pincode,
-    latitude=data.latitude,
-    longitude=data.longitude,
-    contact_number=data.contact_number,
-    email=data.email,
-    status="PENDING"
-)
+            name=data.name,
+            description=data.description,
+            category_id=data.category_id,
+            address=data.address,
+            city=data.city,
+            state=data.state,
+            pincode=data.pincode,
+            latitude=data.latitude,
+            longitude=data.longitude,
+            contact_number=data.contact_number,
+            email=data.email,
+            status="PENDING"
+        )
 
 
         return OrganizationRepository.create(db, org)
@@ -51,9 +51,9 @@ class OrganizationService:
 
         org.status = "ACTIVE"
         return OrganizationRepository.update(db, org)
-    
+
     @staticmethod
-    def update_organization(db: Session, org_id: int, data: OrganizationUpdate):
+    def update_organization(db: Session, org_id: int, data: "OrganizationUpdate"):
         org = OrganizationRepository.get_by_id(db, org_id)
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")

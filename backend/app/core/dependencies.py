@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import JWT_SECRET_KEY, JWT_ALGORITHM
 from app.core.database import SessionLocal
-from app.models.user import User
+from app.models.user import User, UserSession
+from app.models.role_mapping import UserRole
+from datetime import datetime
 
 security = HTTPBearer()
 
@@ -30,11 +32,20 @@ def get_current_user(
         user_id = payload.get("user_id")
         org_id = payload.get("org_id")
         role = payload.get("role")
+        session_id = payload.get("session_id")
+        jwt_token_version = payload.get("token_version", 0)
 
         if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token payload",
+            )
+
+        # CRITICAL 2 — Require session_id in JWT
+        if session_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing session_id. Please login again.",
             )
 
     except JWTError:
@@ -55,9 +66,46 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
         )
-    
-    # CRITICAL: attach tenant context to user object
+
+    # Token version enforcement — reject if mismatch
+    if jwt_token_version != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been invalidated. Please login again.",
+        )
+
+    # Session expiration enforcement — validate specific session by ID
+    session = db.query(UserSession).filter(
+        UserSession.id == session_id,
+        UserSession.user_id == user.id,
+        UserSession.expires_at > datetime.utcnow(),
+    ).first()
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired or revoked",
+        )
+
+    # ADDITION 4 — Tenant context enforcement
+    if org_id is not None:
+        membership = (
+            db.query(UserRole)
+            .filter(
+                UserRole.user_id == user.id,
+                UserRole.org_id == org_id,
+            )
+            .first()
+        )
+        if not membership:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User does not belong to this organization",
+            )
+
+    # CRITICAL: attach tenant context and session context to user object
     user.current_org_id = org_id
     user.current_role = role
+    user.current_session_id = session.id
 
     return user

@@ -10,6 +10,7 @@ from app.models import user
 from app.models import role
 from app.models import role_mapping
 from app.models import organization
+from app.models import driver
 
 from alembic import context
 

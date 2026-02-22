@@ -8,8 +8,6 @@ from app.api.v1.organizations.category_schemas import (
     CategoryResponse
 )
 from app.core.permissions import require_permission
-from app.models.user import User
-from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/org-categories")
 
@@ -18,7 +16,7 @@ router = APIRouter(prefix="/org-categories")
 def create_category(
     data: CategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("category.create"))
+    current_user=Depends(require_permission("category.create"))
 ):
     return CategoryService.create_category(db, data)
 
@@ -26,7 +24,7 @@ def create_category(
 @router.get("", response_model=list[CategoryResponse])
 def list_categories(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("category.view"))
+    current_user=Depends(require_permission("category.view"))
 ):
     return CategoryService.get_categories(db)
 
@@ -36,7 +34,7 @@ def update_category(
     category_id: int,
     data: CategoryUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("category.update"))
+    current_user=Depends(require_permission("category.update"))
 ):
     return CategoryService.update_category(db, category_id, data)
 
@@ -45,7 +43,7 @@ def update_category(
 def delete_category(
     category_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("category.delete"))
+    current_user=Depends(require_permission("category.delete"))
 ):
     CategoryService.delete_category(db, category_id)
     return {"message": "Category deleted successfully"}

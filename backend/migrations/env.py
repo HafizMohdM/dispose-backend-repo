@@ -13,7 +13,14 @@ from app.models import organization
 from app.models import driver
 from app.models import notification
 from app.models import audit_log
+from app.models import subscription_plan
+from app.models import subscription
+from app.models import subscription_usage
+from app.models import audit_log
 
+from app.models import pickup
+from app.models import pickup_assignment
+from app.models import pickup_media
 from alembic import context
 
 # this is the Alembic Config object, which provides

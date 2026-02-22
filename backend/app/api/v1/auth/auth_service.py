@@ -48,7 +48,16 @@ def assign_default_role(db: Session, user_id: int, org_id: int = 1):
     )
 
     if not default_role:
-        raise Exception("Default role CUSTOMER not found")
+        # Auto-create the role to prevent 500 errors
+        default_role = Role(
+            name="CUSTOMER",
+            description="Organization customer",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.add(default_role)
+        db.commit()
+        db.refresh(default_role)
 
     user_role = UserRole(
         user_id=user_id,

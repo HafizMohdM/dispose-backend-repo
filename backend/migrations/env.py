@@ -11,6 +11,8 @@ from app.models import role
 from app.models import role_mapping
 from app.models import organization
 from app.models import driver
+from app.models import notification
+from app.models import audit_log
 
 from alembic import context
 

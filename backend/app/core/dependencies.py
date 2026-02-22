@@ -109,3 +109,28 @@ def get_current_user(
     user.current_session_id = session.id
 
     return user
+
+
+def get_current_organization(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.models.organization import Organization
+
+    org_id = getattr(current_user, "current_org_id", None)
+
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No organization context in token. Please login with an organization.",
+        )
+
+    organization = db.query(Organization).filter(Organization.id == org_id).first()
+
+    if organization is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    return organization

@@ -1,4 +1,8 @@
 from fastapi import APIRouter
+
+api_router = APIRouter()
+
+
 from app.api.v1.auth.auth_routes import router as auth_routes
 from app.api.v1.admin.admin_routes import router as admin_router
 from app.api.v1.organizations.org_routes import router as org_router
@@ -7,8 +11,8 @@ from app.api.v1.subscriptions.subscription_routes import router as subscription_
 from app.api.v1.pickups.pickup_routes import router as pickup_router
 from app.api.v1.drivers.driver_routes import router as driver_router
 from app.api.v1.notifications.notification_routes import router as notification_router
+from app.api.v1.audit.audit_route import router as audit_router
 
-api_router = APIRouter()
 
 api_router.include_router(
     auth_routes,
@@ -51,4 +55,10 @@ api_router.include_router(
     notification_router,
     prefix="/notifications",
     tags=["Notifications"]
+)
+
+api_router.include_router(
+    audit_router,
+    prefix="/audit-logs",
+    tags=["Audit Logs"]
 )

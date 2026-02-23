@@ -24,7 +24,7 @@ from app.api.v1.drivers.driver_schemas import (
 router = APIRouter()
 
 
-# ── Static routes MUST come before /{driver_id} to avoid shadowing ──
+
 
 
 @router.get(

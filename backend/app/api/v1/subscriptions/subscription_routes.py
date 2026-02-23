@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.permissions import require_permission
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_user_org
 from app.models.user import User
 from app.models.role_mapping import UserRole
 from app.models.organization import Organization
@@ -19,15 +19,6 @@ from app.api.v1.subscriptions.subscription_schemas import (
 from app.services.subscription_service import SubscriptionService
 
 router = APIRouter(prefix="/subscription", tags=["Subscriptions"])
-
-def get_user_org(db: Session, user: User) -> Organization:
-    user_role = db.query(UserRole).filter(UserRole.user_id == user.id).first()
-    if not user_role:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not associated with any organization")
-    org = db.query(Organization).filter(Organization.id == user_role.org_id).first()
-    if not org:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
-    return org
 
 @router.get("/plans", response_model=list[PlanResponse])
 def get_plans(

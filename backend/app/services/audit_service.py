@@ -25,3 +25,18 @@ def log_event(db, user_id, action, org_id=None, metadata=None, session_id=None, 
     )
     db.add(log)
     db.commit()
+
+
+class AuditService:
+
+    def __init__(self, db):
+        self.db = db
+
+    def log_action(self, user_id, action, org_id=None, meta=None):
+        log_event(
+            db=self.db,
+            user_id=user_id,
+            action=action,
+            org_id=org_id,
+            metadata=meta,
+        )

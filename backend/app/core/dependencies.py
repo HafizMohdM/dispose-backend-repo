@@ -7,6 +7,7 @@ from app.core.config import JWT_SECRET_KEY, JWT_ALGORITHM
 from app.core.database import SessionLocal
 from app.models.user import User, UserSession
 from app.models.role_mapping import UserRole
+from app.models.organization import Organization
 from datetime import datetime
 
 security = HTTPBearer()
@@ -134,3 +135,19 @@ def get_current_organization(
         )
 
     return organization
+
+
+def get_user_org(db: Session, user: User) -> Organization:
+    user_role = db.query(UserRole).filter(UserRole.user_id == user.id).first()
+    if not user_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not associated with any organization",
+        )
+    org = db.query(Organization).filter(Organization.id == user_role.org_id).first()
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+    return org

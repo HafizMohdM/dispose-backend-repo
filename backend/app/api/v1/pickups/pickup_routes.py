@@ -16,9 +16,8 @@ from app.models.pickup import PickupStatus
 from app.models.pickup_assignment import AssignmentStatus
 from app.models.user import User
 
-# Reusing the existing org lookup helper defined for subscriptions
-# to keep code DRY, or implementing locally.
-from app.api.v1.subscriptions.subscription_routes import get_user_org
+from app.core.dependencies import get_db, get_user_org
+from app.core.permissions import require_permission
 
 router = APIRouter(prefix="/pickups", tags=["Pickups"])
 

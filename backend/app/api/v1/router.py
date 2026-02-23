@@ -12,6 +12,8 @@ from app.api.v1.pickups.pickup_routes import router as pickup_router
 from app.api.v1.drivers.driver_routes import router as driver_router
 from app.api.v1.notifications.notification_routes import router as notification_router
 from app.api.v1.audit.audit_route import router as audit_router
+from app.api.v1.analytics.analytics_routes import router as analytics_router
+from app.api.v1.media.media_routes import router as media_routes
 
 
 api_router.include_router(
@@ -62,3 +64,17 @@ api_router.include_router(
     prefix="/audit-logs",
     tags=["Audit Logs"]
 )
+
+api_router.include_router(
+    analytics_router,
+    prefix="/analytics",
+    tags=["Analytics"]
+)
+
+
+api_router.include_router(
+    media_routes,
+    prefix="/media",
+    tags=["Media"]
+)
+

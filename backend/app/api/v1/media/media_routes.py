@@ -76,3 +76,21 @@ def delete_media(
     db.commit()
 
     return {"success": True}
+
+@router.get(
+    "/{media_id}/url",
+)
+def get_media_signed_url(
+    media_id:UUID,
+    expires_in: int = 3600,
+    db: Session = Depends(get_db),
+    org= Depends(get_current_organization),
+    _:bool = Depends(require_permission("media:view")),
+):
+    service = MediaService(db)
+
+    return service.get_signed_url(
+        media_id=media_id,
+        organization_id=org.id,
+        expires_in=expires_in
+    )

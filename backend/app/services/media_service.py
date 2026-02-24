@@ -61,3 +61,37 @@ class MediaService:
             pass
 
         self.repo.delete(media)
+
+    def get_signed_url(
+        self,
+        media_id,
+        organization_id:int,
+        expires_in:int=3600
+    ):
+
+    #secure signed URL 
+
+        media = self.repo.get_by_id_and_org(media_id,organization_id)
+        if not media:
+            raise HTTPException(status_code=404,details ="Media not found")
+        try:
+            response = supabase.storage.from_("media").create_signed_url(
+                path=media.file_path,
+                expires_in=expires_in
+            )
+
+            signed_url = response.get("signedURL")
+
+            if not signed_url:
+                raise Exception("Failed to generate signed URL")
+            return{
+                "media_id": str(media_id),
+                "url": signed_url,
+                "expires_in": expires_in
+
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500,details ="Failed to generate signed URL: " + str(e))
+
+    
+

@@ -17,10 +17,12 @@ def log_event(db, user_id, action, org_id=None, metadata=None, session_id=None, 
         enriched["ip_address"] = ip_address
 
     log = AuditLog(
-        user_id=user_id,
+        entity_type="auth",
+        entity_id=user_id,
+        changed_by=user_id,
         action=action,
         org_id=org_id,
-        meta=json.dumps(enriched) if enriched else None,
+        new_value=json.dumps(enriched) if enriched else None,
         created_at=datetime.utcnow(),
     )
     db.add(log)

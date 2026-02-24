@@ -15,6 +15,8 @@ from app.api.v1.audit.audit_route import router as audit_router
 from app.api.v1.analytics.analytics_routes import router as analytics_router
 from app.api.v1.media.media_routes import router as media_routes
 from app.api.v1.admin.rbac_routes import router as rbac_router
+from app.api.v1.system.system_setting_routes import router as system_setting_router
+from app.api.v1.analytics.driver_analytics_routes import router as driver_analytics_router
 
 api_router.include_router(
     auth_routes,
@@ -29,6 +31,12 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    rbac_router,
+    prefix="/admin",
+    tags=["Admin Roles & Permissions"]
+) 
+
+api_router.include_router(
     org_router,
     prefix="/organizations",
     tags=["Organizations"]
@@ -41,16 +49,24 @@ api_router.include_router(
 )
 
 api_router.include_router(
-    driver_router,
-    prefix="/drivers",
-    tags=["Drivers"]
-)
-api_router.include_router(
     subscription_router,
 )
 
 api_router.include_router(
+    driver_router,
+    prefix="/drivers",
+    tags=["Drivers"]
+)
+
+
+api_router.include_router(
     pickup_router,
+)
+
+api_router.include_router(
+    media_routes,
+    prefix="/media",
+    tags=["Media"]
 )
 
 api_router.include_router(
@@ -71,17 +87,25 @@ api_router.include_router(
     tags=["Analytics"]
 )
 
+api_router.include_router(
+    driver_analytics_router,
+    prefix="/analytics/drivers",
+    tags=["Driver Analytics"]
+)
 
 api_router.include_router(
-    media_routes,
-    prefix="/media",
-    tags=["Media"]
+    system_setting_router,
+    prefix="/system-settings",
+    tags=["System Settings"]
 )
 
 
-api_router.include_router(
-    rbac_router,
-    prefix="/admin",
-    tags=["Admin Roles & Permissions"]
-) 
+
+
+
+
+
+
+
+
 

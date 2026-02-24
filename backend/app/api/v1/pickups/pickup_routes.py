@@ -11,6 +11,12 @@ from app.api.v1.pickups.pickup_schemas import (
     PickupAssignmentResponse,
     PickupListResponse
 )
+from app.api.v1.pickups.pickup_workflow_schemas import (
+    PickupCancelRequest,
+    PickupRescheduleRequest,
+    PickupRejectRequest,
+    PickupCompleteRequest
+)
 from app.api.v1.pickups.pickup_service import PickupService
 from app.models.pickup import PickupStatus
 from app.models.pickup_assignment import AssignmentStatus
@@ -129,3 +135,68 @@ def assign_driver(
     """
     # Assuming assigning requires an explicitly elevated role check beyond just pickup.manage if needed
     return PickupService.assign_driver(db, pickup_id, driver_id)
+
+@router.post("/{pickup_id}/cancel", response_model=PickupResponse)
+def cancel_pickup(
+    pickup_id: int,
+    request: PickupCancelRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.cancel"))
+):
+    """
+    Cancel a PENDING or ASSIGNED pickup. Reverts subscription usage.
+    """
+    return PickupService.cancel_pickup(db, pickup_id, request, current_user)
+
+
+@router.post("/{pickup_id}/reschedule", response_model=PickupResponse)
+def reschedule_pickup(
+    pickup_id: int,
+    request: PickupRescheduleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.reschedule"))
+):
+    """
+    Reschedule a pickup to a future time.
+    """
+    return PickupService.reschedule_pickup(db, pickup_id, request, current_user)
+
+
+@router.post("/{pickup_id}/accept", response_model=PickupResponse)
+def accept_pickup(
+    pickup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.accept"))
+):
+    """
+    Driver accepts an assigned pickup, moving it to IN_PROGRESS.
+    """
+    return PickupService.accept_pickup(db, pickup_id, current_user)
+
+
+@router.post("/{pickup_id}/reject", response_model=PickupResponse)
+def reject_pickup(
+    pickup_id: int,
+    request: PickupRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.reject"))
+):
+    """
+    Driver rejects an assigned pickup. Returns it to PENDING.
+    """
+    return PickupService.reject_pickup(db, pickup_id, request, current_user)
+
+
+@router.post("/{pickup_id}/complete", response_model=PickupResponse)
+def complete_pickup(
+    pickup_id: int,
+    request: PickupCompleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.complete"))
+):
+    """
+    Driver completes a pickup and submits the actual weight.
+    """
+    return PickupService.complete_pickup(db, pickup_id, request, current_user)
+
+

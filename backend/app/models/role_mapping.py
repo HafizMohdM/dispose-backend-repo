@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 
 class RolePermission(Base,TimestampMixin):
@@ -11,6 +12,9 @@ class RolePermission(Base,TimestampMixin):
         UniqueConstraint("role_id", "permission_id", name="uq_role_permission"),
     )
     
+    role = relationship("Role", back_populates="permissions")
+    permission = relationship("Permission")
+    
 
 class UserRole(Base,TimestampMixin):
     __tablename__ = "user_roles"
@@ -22,4 +26,7 @@ class UserRole(Base,TimestampMixin):
     __table_args__ = (
         UniqueConstraint("user_id", "role_id","org_id", name="uq_user_role"),
     )
+    
+    user = relationship("User", back_populates="roles")
+    role = relationship("Role")
 

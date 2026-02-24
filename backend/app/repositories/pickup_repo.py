@@ -65,3 +65,37 @@ class PickupRepository:
         db.add(assignment)
         db.flush()
         return assignment
+
+    @staticmethod
+    def get_with_lock(db: Session, pickup_id: int) -> Pickup:
+        return db.query(Pickup).options(
+            joinedload(Pickup.assignments)
+        ).filter(Pickup.id == pickup_id).with_for_update().first()
+
+    @staticmethod
+    def remove_assignment(db: Session, pickup_id: int, driver_id: int):
+        assignment = db.query(PickupAssignment).filter(
+            PickupAssignment.pickup_id == pickup_id,
+            PickupAssignment.driver_id == driver_id
+        ).first()
+        if assignment:
+            db.delete(assignment)
+            db.flush()
+
+    @staticmethod
+    def update_schedule(db: Session, pickup_id: int, scheduled_at: datetime) -> Pickup:
+        pickup = db.query(Pickup).filter(Pickup.id == pickup_id).first()
+        if pickup:
+            pickup.scheduled_at = scheduled_at
+            db.flush()
+        return pickup
+
+    @staticmethod
+    def update_completion(db: Session, pickup_id: int, actual_weight: float) -> Pickup:
+        pickup = db.query(Pickup).filter(Pickup.id == pickup_id).first()
+        if pickup:
+            pickup.status = PickupStatus.COMPLETED
+            pickup.completed_at = datetime.utcnow()
+            pickup.waste_weight = actual_weight
+            db.flush()
+        return pickup

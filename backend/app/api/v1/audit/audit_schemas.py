@@ -7,9 +7,12 @@ from pydantic import BaseModel
 class AuditLogResponse(BaseModel):
     id: int
     org_id: Optional[int] = None
-    user_id: int
+    changed_by: int
+    entity_type: str
+    entity_id: int
     action: str
-    meta: Optional[str] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
     created_at: datetime
 
     class Config:

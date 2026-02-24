@@ -7,8 +7,11 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    entity_type = Column(String(50), nullable=False, default="role")
+    entity_id = Column(Integer, nullable=False)
     action = Column(String(100), nullable=False)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
     org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
-    meta = Column(Text, nullable=True)
+    changed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

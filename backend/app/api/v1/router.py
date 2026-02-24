@@ -14,7 +14,7 @@ from app.api.v1.notifications.notification_routes import router as notification_
 from app.api.v1.audit.audit_route import router as audit_router
 from app.api.v1.analytics.analytics_routes import router as analytics_router
 from app.api.v1.media.media_routes import router as media_routes
-
+from app.api.v1.admin.rbac_routes import router as rbac_router
 
 api_router.include_router(
     auth_routes,
@@ -77,4 +77,11 @@ api_router.include_router(
     prefix="/media",
     tags=["Media"]
 )
+
+
+api_router.include_router(
+    rbac_router,
+    prefix="/admin",
+    tags=["Admin Roles & Permissions"]
+) 
 

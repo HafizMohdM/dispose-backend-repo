@@ -8,6 +8,13 @@ from app.models.pickup import Pickup, PickupStatus
 from app.models.subscription import SubscriptionStatus
 from app.models.pickup_assignment import AssignmentStatus
 from app.api.v1.pickups.pickup_schemas import PickupCreateRequest, PickupUpdateStatusRequest
+from app.api.v1.pickups.pickup_workflow_schemas import (
+    PickupCancelRequest,
+    PickupRescheduleRequest,
+    PickupRejectRequest,
+    PickupCompleteRequest
+)
+from app.services.audit_service import log_event
 
 class PickupService:
 
@@ -147,3 +154,152 @@ class PickupService:
         db.commit()
         db.refresh(pickup)
         return assignment
+
+    @staticmethod
+    def cancel_pickup(db: Session, pickup_id: int, request: PickupCancelRequest, user):
+        pickup = PickupRepository.get_with_lock(db, pickup_id)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+        
+        if pickup.status not in [PickupStatus.PENDING, PickupStatus.ASSIGNED]:
+            raise HTTPException(status_code=400, detail="Only PENDING or ASSIGNED pickups can be cancelled")
+
+        # Rollback subscription usage
+        from app.services.subscription_service import SubscriptionService
+        try:
+            SubscriptionService.validate_and_increment_usage(
+                db=db, 
+                subscription_id=pickup.subscription_id, 
+                pickups=-1, 
+                weight=-pickup.waste_weight, 
+                drivers=0
+            )
+        except Exception:
+            pass
+
+        updated_pickup = PickupRepository.update_pickup_status(db, pickup_id, PickupStatus.CANCELLED)
+        
+        log_event(
+            db=db, 
+            user_id=user.id, 
+            action="CANCEL", 
+            org_id=pickup.organization_id, 
+            metadata={"entity_type": "pickup", "pickup_id": pickup_id, "reason": request.cancellation_reason}
+        )
+        
+        db.commit()
+        db.refresh(updated_pickup)
+        return updated_pickup
+
+    @staticmethod
+    def reschedule_pickup(db: Session, pickup_id: int, request: PickupRescheduleRequest, user):
+        pickup = PickupRepository.get_with_lock(db, pickup_id)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+            
+        if pickup.status not in [PickupStatus.PENDING, PickupStatus.ASSIGNED]:
+            raise HTTPException(status_code=400, detail="Only PENDING or ASSIGNED pickups can be rescheduled")
+
+        old_schedule = pickup.scheduled_at.isoformat() if pickup.scheduled_at else None
+        
+        updated_pickup = PickupRepository.update_schedule(db, pickup_id, request.new_scheduled_at)
+        
+        log_event(
+            db=db, 
+            user_id=user.id, 
+            action="RESCHEDULE", 
+            org_id=pickup.organization_id, 
+            metadata={
+                "entity_type": "pickup", 
+                "pickup_id": pickup_id, 
+                "old_schedule": old_schedule,
+                "new_schedule": request.new_scheduled_at.isoformat(),
+                "reason": request.reason
+            }
+        )
+        
+        db.commit()
+        db.refresh(updated_pickup)
+        return updated_pickup
+
+    @staticmethod
+    def accept_pickup(db: Session, pickup_id: int, user):
+        pickup = PickupRepository.get_with_lock(db, pickup_id)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+            
+        if pickup.status != PickupStatus.ASSIGNED:
+            raise HTTPException(status_code=400, detail="Only ASSIGNED pickups can be accepted")
+
+        is_assigned = any(assignment.driver_id == user.id for assignment in pickup.assignments)
+        if not is_assigned:
+            raise HTTPException(status_code=403, detail="You are not assigned to this pickup")
+
+        updated_pickup = PickupRepository.update_pickup_status(db, pickup_id, PickupStatus.IN_PROGRESS)
+        
+        log_event(
+            db=db, 
+            user_id=user.id, 
+            action="ACCEPT_PICKUP", 
+            org_id=pickup.organization_id, 
+            metadata={"entity_type": "pickup", "pickup_id": pickup_id}
+        )
+        
+        db.commit()
+        db.refresh(updated_pickup)
+        return updated_pickup
+
+    @staticmethod
+    def reject_pickup(db: Session, pickup_id: int, request: PickupRejectRequest, user):
+        pickup = PickupRepository.get_with_lock(db, pickup_id)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+            
+        if pickup.status != PickupStatus.ASSIGNED:
+            raise HTTPException(status_code=400, detail="Only ASSIGNED pickups can be rejected")
+
+        is_assigned = any(assignment.driver_id == user.id for assignment in pickup.assignments)
+        if not is_assigned:
+            raise HTTPException(status_code=403, detail="You are not assigned to this pickup")
+
+        PickupRepository.remove_assignment(db, pickup_id, user.id)
+        updated_pickup = PickupRepository.update_pickup_status(db, pickup_id, PickupStatus.PENDING)
+        
+        log_event(
+            db=db, 
+            user_id=user.id, 
+            action="REJECT_PICKUP", 
+            org_id=pickup.organization_id, 
+            metadata={"entity_type": "pickup", "pickup_id": pickup_id, "reason": request.reason}
+        )
+        
+        db.commit()
+        db.refresh(updated_pickup)
+        return updated_pickup
+
+    @staticmethod
+    def complete_pickup(db: Session, pickup_id: int, request: PickupCompleteRequest, user):
+        pickup = PickupRepository.get_with_lock(db, pickup_id)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+            
+        if pickup.status != PickupStatus.IN_PROGRESS:
+            raise HTTPException(status_code=400, detail="Only IN_PROGRESS pickups can be completed")
+
+        is_assigned = any(assignment.driver_id == user.id for assignment in pickup.assignments)
+        if not is_assigned:
+            raise HTTPException(status_code=403, detail="You are not assigned to this pickup")
+
+        updated_pickup = PickupRepository.update_completion(db, pickup_id, request.actual_weight)
+        
+        log_event(
+            db=db, 
+            user_id=user.id, 
+            action="COMPLETE_PICKUP", 
+            org_id=pickup.organization_id, 
+            metadata={"entity_type": "pickup", "pickup_id": pickup_id, "actual_weight": request.actual_weight, "notes": request.notes}
+        )
+        
+        db.commit()
+        db.refresh(updated_pickup)
+        return updated_pickup

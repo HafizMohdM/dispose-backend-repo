@@ -16,6 +16,9 @@ class User(Base,TimestampMixin):
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
 
+    # Relationships
+    roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+
 
 class UserSession(Base,TimestampMixin):
     __tablename__ = "user_sessions"

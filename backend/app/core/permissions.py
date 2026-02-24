@@ -20,7 +20,6 @@ def require_permission(permission_name: str):
             .filter(UserRole.user_id == current_user.id)
             .all()
         )
-
         permission_names = [p.code for p in permissions]
 
         if permission_name not in permission_names:

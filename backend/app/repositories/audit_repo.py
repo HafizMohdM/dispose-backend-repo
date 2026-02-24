@@ -33,7 +33,7 @@ class AuditRepository:
             self.db.query(AuditLog)
             .filter(
                 AuditLog.org_id == organization_id,
-                AuditLog.user_id == user_id,
+                AuditLog.changed_by == user_id,
             )
             .order_by(AuditLog.created_at.desc())
             .offset(skip)
@@ -50,14 +50,14 @@ class AuditRepository:
         limit: int = 50,
     ):
         """
-        Filter by action prefix as a proxy for entity_type,
-        since the AuditLog model does not have dedicated entity_type/entity_id columns.
+        Filter by native entity_type and entity_id fields.
         """
         return (
             self.db.query(AuditLog)
             .filter(
                 AuditLog.org_id == organization_id,
-                AuditLog.action.ilike(f"{entity_type}%"),
+                AuditLog.entity_type == entity_type,
+                AuditLog.entity_id == entity_id,
             )
             .order_by(AuditLog.created_at.desc())
             .offset(skip)

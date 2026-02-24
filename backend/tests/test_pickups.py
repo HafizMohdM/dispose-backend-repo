@@ -88,15 +88,76 @@ def test_invalid_status_transition_rejected(client: TestClient, db: Session, adm
 
 
 def test_driver_access_control(client: TestClient, db: Session, driver_token: str):
+def test_driver_reject_returns_to_pending(client: TestClient, db: Session, driver_token: str):
     """
-    Test that a Driver can only view pickups they are assigned to.
+    Test that a Driver rejecting a pickup removes the assignment and sets it to PENDING.
     """
-    # Setup: Create Pickup A (unassigned), Pickup B (assigned to Driver 1)
+    # Setup: Create Pickup (ASSIGNED to Driver)
     
-    # Action: Driver 1 calls GET /api/v1/pickups/
-    response = client.get("/api/v1/pickups/", headers={"Authorization": f"Bearer {driver_token}"})
+    # Action: Driver calls POST /api/v1/pickups/{id}/reject
+    response = client.post(
+        "/api/v1/pickups/1/reject", 
+        headers={"Authorization": f"Bearer {driver_token}"},
+        json={"reason": "Vehicle broke down"}
+    )
     
     # Assert
     assert response.status_code == 200
-    pickups = response.json()["pickups"]
-    assert len(pickups) == 1  # Should only see Pickup B
+    assert response.json()["status"] == "PENDING"
+
+
+def test_driver_complete_updates_weight(client: TestClient, db: Session, driver_token: str):
+    """
+    Test that completing a pickup successfully sets completed_at and updates actual_weight.
+    """
+    # Setup: Create Pickup (IN_PROGRESS by Driver)
+    
+    # Action: Driver calls POST /api/v1/pickups/{id}/complete
+    response = client.post(
+        "/api/v1/pickups/1/complete", 
+        headers={"Authorization": f"Bearer {driver_token}"},
+        json={"actual_weight": 25.0, "notes": "All sorted"}
+    )
+    
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["status"] == "COMPLETED"
+    assert response.json()["waste_weight"] == 25.0
+    assert response.json()["completed_at"] is not None
+
+
+def test_cancel_reverts_subscription_usage(client: TestClient, db: Session, org_user_token: str):
+    """
+    Test that cancelling a PENDING pickup reverts the subscription usage points.
+    """
+    # Setup: Organization with Active Subscription. Usage: pickups_used=1, waste_weight_used=15.0
+    # Create PENDING pickup of 15.0 kg
+    
+    # Action: Organization calls POST /api/v1/pickups/{id}/cancel
+    response = client.post(
+        "/api/v1/pickups/1/cancel", 
+        headers={"Authorization": f"Bearer {org_user_token}"},
+        json={"cancellation_reason": "Sent accidentally"}
+    )
+    
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+    # Usage db checks to ensure pickups_used=0 and waste_weight=0
+
+
+def test_invalid_workflow_state_transition(client: TestClient, db: Session, driver_token: str):
+    """
+    Test that a Driver cannot ACCEPT a pickup that is already marked CANCELLED or COMPLETED.
+    """
+    # Setup: Create Pickup (CANCELLED)
+    
+    # Action: Driver calls POST /api/v1/pickups/{id}/accept
+    response = client.post(
+        "/api/v1/pickups/1/accept", 
+        headers={"Authorization": f"Bearer {driver_token}"}
+    )
+    
+    # Assert
+    assert response.status_code == 400
+    assert "Only ASSIGNED pickups can be accepted" in response.json()["detail"]

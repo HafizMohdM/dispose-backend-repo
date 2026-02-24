@@ -17,6 +17,9 @@ from app.api.v1.media.media_routes import router as media_routes
 from app.api.v1.admin.rbac_routes import router as rbac_router
 from app.api.v1.system.system_setting_routes import router as system_setting_router
 from app.api.v1.analytics.driver_analytics_routes import router as driver_analytics_router
+from app.api.v1.websockets.driver_tracking_routes import router as ws_router
+
+
 
 api_router.include_router(
     auth_routes,
@@ -98,6 +101,8 @@ api_router.include_router(
     prefix="/system-settings",
     tags=["System Settings"]
 )
+
+api_router.include_router(ws_router)
 
 
 

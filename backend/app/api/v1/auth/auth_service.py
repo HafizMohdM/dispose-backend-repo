@@ -15,6 +15,7 @@ from app.core.security import (
 
 from app.core.config import OTP_EXPIRY_MINUTES
 from app.services.audit_service import log_event
+from app.services.sms_service import SmsService
 
 OTP_RATE_LIMIT = 5
 OTP_RATE_WINDOW_MINUTES = 15
@@ -121,8 +122,10 @@ def request_otp(db: Session, mobile: str):
     db.add(session)
     db.commit()
 
-    # For testing only. Production should send via SMS
-    return otp
+    # Send OTP via SMS
+    SmsService.send_otp(mobile, otp)
+
+    return True
 
 
 # ---------------------------------------------------

@@ -60,3 +60,19 @@ OTP_EXPIRY_MINUTES = int(
 ACCESS_TOKEN_EXPIRE_MINUTES = int(
     os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
 )
+
+# ========================
+# TWILIO CONFIGURATION
+# ========================
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+
+# ========================
+# RAZORPAY CONFIGURATION
+# ========================
+
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_SL2t52a6r7GIcE")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "wk1foVV2bXcbmmnb8CjsPdiR")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "AF_WAZvdyR3TG@d")

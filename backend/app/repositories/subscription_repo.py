@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
+from datetime import datetime
 from app.models.subscription_plan import SubscriptionPlan
 from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.subscription_usage import SubscriptionUsage
@@ -41,6 +42,10 @@ class SubscriptionRepository:
         return subscription
 
     @staticmethod
+    def get_subscription_by_id(db: Session, subscription_id: int) -> Subscription:
+        return db.query(Subscription).filter(Subscription.id == subscription_id).first()
+
+    @staticmethod
     def get_active_subscription(db: Session, organization_id: int) -> Subscription:
         return db.query(Subscription).filter(
             Subscription.organization_id == organization_id,
@@ -52,6 +57,13 @@ class SubscriptionRepository:
         return db.query(Subscription).filter(
             Subscription.organization_id == organization_id
         ).order_by(Subscription.created_at.desc()).first()
+
+    @staticmethod
+    def get_expiring_subscriptions(db: Session, before_date: datetime) -> list[Subscription]:
+        return db.query(Subscription).filter(
+            Subscription.status == SubscriptionStatus.ACTIVE,
+            Subscription.end_date <= before_date
+        ).all()
 
     @staticmethod
     def update_subscription_status(db: Session, subscription_id: int, status: SubscriptionStatus, cancelled_at=None) -> Subscription:

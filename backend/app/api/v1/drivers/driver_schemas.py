@@ -7,7 +7,7 @@ from app.utils.enums import DriverStatus,DriverAvailabilityStatus
 
 
 class DriverCreateRequest(BaseModel):
-    organization_id: Optional[UUID] = None
+    organization_id: Optional[int] = None
     name: str = Field(..., min_length=3, max_length=100)
     mobile: str = Field(..., min_length=10, max_length=15)
     email: Optional[EmailStr] = None
@@ -16,7 +16,7 @@ class DriverCreateRequest(BaseModel):
     notes: Optional[str] =None
 
 class DriverUpdateRequest(BaseModel):
-    organization_id: Optional[UUID] = None
+    organization_id: Optional[int] = None
     name: Optional[str] = Field(None, min_length=2, max_length=255)
     email: Optional[EmailStr] = None
     license_number: Optional[str] = Field(None, max_length=100)
@@ -27,7 +27,7 @@ class DriverUpdateRequest(BaseModel):
 class DriverResponse(BaseModel):
 
     id: UUID
-    organization_id: UUID
+    organization_id: int
     name: str
     mobile: str
     email: Optional[str]

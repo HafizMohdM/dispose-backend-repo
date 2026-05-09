@@ -21,6 +21,8 @@ from app.models import audit_log
 from app.models import pickup
 from app.models import pickup_assignment
 from app.models import pickup_media
+from app.models import invoice
+from app.models import payment
 from alembic import context
 
 # this is the Alembic Config object, which provides

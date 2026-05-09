@@ -6,6 +6,7 @@ import enum
 class SubscriptionStatus(str, enum.Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    GRACE = "GRACE"
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
     SUSPENDED = "SUSPENDED"

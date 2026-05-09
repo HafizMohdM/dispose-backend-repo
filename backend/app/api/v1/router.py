@@ -18,6 +18,7 @@ from app.api.v1.admin.rbac_routes import router as rbac_router
 from app.api.v1.system.system_setting_routes import router as system_setting_router
 from app.api.v1.analytics.driver_analytics_routes import router as driver_analytics_router
 from app.api.v1.websockets.driver_tracking_routes import router as ws_router
+from app.api.v1.payments.payment_routes import router as payment_router
 
 
 
@@ -101,7 +102,9 @@ api_router.include_router(
     prefix="/system-settings",
     tags=["System Settings"]
 )
-
+api_router.include_router(
+    payment_router
+)
 api_router.include_router(ws_router)
 
 

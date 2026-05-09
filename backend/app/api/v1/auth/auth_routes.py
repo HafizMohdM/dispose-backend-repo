@@ -34,8 +34,8 @@ def get_db():
 
 @router.post("/request-otp")
 def request_otp_api(payload: RequestOTP, db: Session = Depends(get_db)):
-    otp = request_otp(db, payload.mobile)
-    return {"message": "OTP sent", "otp": otp}  # REMOVE otp later
+    request_otp(db, payload.mobile)
+    return {"message": "OTP sent successfully"}
 
 
 @router.post("/verify-otp")

@@ -5,9 +5,10 @@ from app.services.organization_service import OrganizationService
 from app.api.v1.organizations.org_schemas import OrganizationCreate, OrganizationResponse
 from app.core.permissions import require_permission
 from app.api.v1.organizations.org_schemas import OrganizationUpdate
-
+from app.api.v1.organizations.member_routes import router as member_router
 
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
+router.include_router(member_router)
 
 
 @router.post(

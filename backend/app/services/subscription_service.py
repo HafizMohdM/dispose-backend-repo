@@ -87,12 +87,25 @@ class SubscriptionService:
         )
         SubscriptionRepository.create_subscription(db, new_sub)
         
-        # 5. Simulate payment success -> Activate subscription
-        new_sub.status = SubscriptionStatus.ACTIVE
+        # 5. Create Invoice for the subscription
+        from app.repositories.payment_repo import PaymentRepository
+        invoice = PaymentRepository.create_invoice(
+            db=db,
+            organization_id=organization.id,
+            amount=plan.price,
+            due_date=now,
+            subscription_id=new_sub.id
+        )
         
-        # 6. Create usage record
-        usage = SubscriptionUsage(subscription_id=new_sub.id)
-        SubscriptionRepository.create_usage_record(db, usage)
+        # 6. Log the audit event for subscription initiation
+        from app.services.audit_service import AuditService
+        audit_svc = AuditService(db)
+        audit_svc.log_action(
+            user_id=organization.id, # Using org id or placeholder if user context missing
+            action="subscription.initiated",
+            org_id=organization.id,
+            meta={"plan_id": plan.id, "invoice_id": str(invoice.id)}
+        )
         
         # 7. Commit transaction
         db.commit()
@@ -101,19 +114,39 @@ class SubscriptionService:
 
     @staticmethod
     def cancel_subscription(db: Session, organization_id: int):
-        sub = SubscriptionRepository.get_active_subscription(db, organization_id)
+        sub = db.query(Subscription).filter(
+            Subscription.organization_id == organization_id,
+            Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE, SubscriptionStatus.PENDING])
+        ).order_by(Subscription.created_at.desc()).first()
+        
         if not sub:
-            raise HTTPException(status_code=404, detail="No active subscription found")
+            raise HTTPException(status_code=404, detail="No active or pending subscription found")
         
         if sub.status == SubscriptionStatus.CANCELLED:
             raise HTTPException(status_code=400, detail="Subscription is already cancelled")
             
-        sub = SubscriptionRepository.update_subscription_status(
-            db, 
-            sub.id, 
-            SubscriptionStatus.CANCELLED,
-            cancelled_at=datetime.utcnow()
-        )
+        sub.status = SubscriptionStatus.CANCELLED
+        sub.cancelled_at = datetime.utcnow()
+
+        # Phase 3 Hardening: Auto-cancel orphaned invoices & payments to stop ghost checkouts
+        from app.models.invoice import Invoice, InvoiceStatus
+        from app.models.payment import Payment, PaymentStatus
+        
+        pending_invoices = db.query(Invoice).filter(
+            Invoice.subscription_id == sub.id,
+            Invoice.status == InvoiceStatus.PENDING
+        ).all()
+        
+        for inv in pending_invoices:
+            inv.status = InvoiceStatus.CANCELLED
+            # Also cancel initiated payments trying to pay this invoice
+            initiated_payments = db.query(Payment).filter(
+                Payment.invoice_id == inv.id,
+                Payment.status == PaymentStatus.INITIATED
+            ).all()
+            for p in initiated_payments:
+                p.status = PaymentStatus.CANCELLED
+
         db.commit()
         db.refresh(sub)
         return sub
@@ -128,8 +161,8 @@ class SubscriptionService:
         if not new_plan or not new_plan.is_active:
             raise HTTPException(status_code=400, detail="New plan not found or inactive")
             
-        old_sub.status = SubscriptionStatus.EXPIRED
-        db.flush()
+        # We do NOT expire the old sub here. We keep it rolling so they don't lose access.
+        # The webhook processor will auto-expire it once they successfully pay the new invoice.
         
         now = datetime.utcnow()
         if new_plan.billing_cycle == BillingCycle.MONTHLY:
@@ -142,14 +175,31 @@ class SubscriptionService:
             plan_id=new_plan.id,
             start_date=now,
             end_date=end_date,
-            status=SubscriptionStatus.ACTIVE,
+            status=SubscriptionStatus.PENDING,
             auto_renew=True,
             upgraded_from_id=old_sub.id
         )
         SubscriptionRepository.create_subscription(db, new_sub)
         
-        new_usage = SubscriptionUsage(subscription_id=new_sub.id)
-        SubscriptionRepository.create_usage_record(db, new_usage)
+        # 5. Create Invoice for the upgrade
+        from app.repositories.payment_repo import PaymentRepository
+        invoice = PaymentRepository.create_invoice(
+            db=db,
+            organization_id=organization_id,
+            amount=new_plan.price,
+            due_date=now + timedelta(days=7),
+            subscription_id=new_sub.id
+        )
+        
+        # 6. Log the audit event
+        from app.services.audit_service import AuditService
+        audit_svc = AuditService(db)
+        audit_svc.log_action(
+            user_id=organization_id,
+            action="subscription.upgrade_initiated",
+            org_id=organization_id,
+            meta={"old_plan_id": old_sub.plan_id, "new_plan_id": new_plan.id, "invoice_id": str(invoice.id)}
+        )
         
         db.commit()
         db.refresh(new_sub)
@@ -196,3 +246,56 @@ class SubscriptionService:
         if not usage:
             raise HTTPException(status_code=404, detail="Usage record not found")
         return usage
+    @staticmethod
+    def renew_expired_subscriptions(db: Session):
+        now = datetime.utcnow()
+        expiring_subs = SubscriptionRepository.get_expiring_subscriptions(db, now)
+        
+        from app.repositories.payment_repo import PaymentRepository
+        from app.services.audit_service import AuditService
+        
+        audit_svc = AuditService(db)
+        renewed_count = 0
+        
+        for sub in expiring_subs:
+            # Mark old as EXPIRED
+            sub.status = SubscriptionStatus.EXPIRED
+            
+            if not sub.auto_renew:
+                continue
+                
+            # Generate replacement subscription
+            if sub.plan.billing_cycle == BillingCycle.MONTHLY:
+                end_date_new = now + timedelta(days=30)
+            else:
+                end_date_new = now + timedelta(days=365)
+                
+            new_sub = Subscription(
+                organization_id=sub.organization_id,
+                plan_id=sub.plan_id,
+                start_date=now,
+                end_date=end_date_new,
+                status=SubscriptionStatus.PENDING,
+                auto_renew=True
+            )
+            SubscriptionRepository.create_subscription(db, new_sub)
+            
+            # Generate new Invoice
+            invoice = PaymentRepository.create_invoice(
+                db=db,
+                organization_id=sub.organization_id,
+                amount=sub.plan.price,
+                due_date=now + timedelta(days=7), # 7 day grace period
+                subscription_id=new_sub.id
+            )
+            
+            audit_svc.log_action(
+                user_id=sub.organization_id,
+                action="subscription.renewed",
+                org_id=sub.organization_id,
+                meta={"old_sub_id": sub.id, "new_sub_id": new_sub.id, "invoice_id": str(invoice.id)}
+            )
+            renewed_count += 1
+            
+        db.commit()
+        return {"processed": len(expiring_subs), "renewed": renewed_count}

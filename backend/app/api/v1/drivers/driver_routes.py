@@ -23,7 +23,7 @@ from app.api.v1.drivers.driver_schemas import (
 
 router = APIRouter()
 
-def get_org_id(current_user, request_org_id: Optional[UUID] = None) -> UUID:
+def get_org_id(current_user, request_org_id: Optional[int] = None) -> int:
     org_id = request_org_id or getattr(current_user, "current_org_id", None)
     if not org_id:
         raise HTTPException(
@@ -41,7 +41,7 @@ def get_org_id(current_user, request_org_id: Optional[UUID] = None) -> UUID:
 )
 def get_available_drivers(
     limit: int = 50,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:view")),
@@ -102,7 +102,7 @@ def create_driver(
 def list_drivers(
     skip: int = 0,
     limit: int = 50,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:view")),
@@ -126,7 +126,7 @@ def list_drivers(
 )
 def get_driver(
     driver_id: UUID,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:view")),
@@ -183,7 +183,7 @@ def update_driver(
 )
 def delete_driver(
     driver_id: UUID,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:delete")),
@@ -213,7 +213,7 @@ def delete_driver(
 def update_driver_availability(
     driver_id: UUID,
     request: DriverAvailabilityUpdateRequest,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:update")),
@@ -245,7 +245,7 @@ def update_driver_availability(
 def update_driver_location(
     driver_id: UUID,
     request: DriverLocationUpdateRequest,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:update")),
@@ -276,7 +276,7 @@ def update_driver_location(
 )
 def get_driver_latest_location(
     driver_id: UUID,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:view")),
@@ -309,7 +309,7 @@ def get_driver_latest_location(
 )
 def activate_driver(
     driver_id: UUID,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:update")),
@@ -340,7 +340,7 @@ def activate_driver(
 )
 def deactivate_driver(
     driver_id: UUID,
-    organization_id: Optional[UUID] = None,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:update")),

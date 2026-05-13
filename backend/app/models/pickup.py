@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, CheckConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, CheckConstraint, Index
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 
@@ -44,4 +44,7 @@ class Pickup(Base, TimestampMixin):
 
     __table_args__ = (
         CheckConstraint("waste_weight >= 0", name="check_waste_weight_non_negative"),
+        Index("ix_pickups_org_status", "organization_id", "status"),
+        Index("ix_pickups_org_created", "organization_id", "created_at"),
     )
+

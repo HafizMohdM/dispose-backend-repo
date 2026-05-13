@@ -9,3 +9,6 @@ python-jose
 passlib[bcrypt]
 razorpay
 twilio
+celery
+redis
+flower

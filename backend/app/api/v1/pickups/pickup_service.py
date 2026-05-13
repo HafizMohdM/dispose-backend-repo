@@ -15,6 +15,10 @@ from app.api.v1.pickups.pickup_workflow_schemas import (
     PickupCompleteRequest
 )
 from app.services.audit_service import log_event
+from app.core.pubsub import pubsub_service
+from app.services.realtime.realtime_dashboard_service import dashboard_throttler
+import asyncio
+
 
 class PickupService:
 
@@ -65,8 +69,25 @@ class PickupService:
         created_pickup = PickupRepository.create_pickup(db, new_pickup)
         
         # 5. Commit atomic transaction
-        db.commit()
         db.refresh(created_pickup)
+        
+        # 6. Broadcast Realtime Event
+        asyncio.create_task(pubsub_service.publish(
+            f"analytics:org_{organization.id}",
+            {
+                "event": "pickup_created",
+                "organization_id": organization.id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {
+                    "pickup_id": created_pickup.id,
+                    "waste_type": created_pickup.waste_type,
+                    "status": "pending"
+                }
+            }
+        ))
+        
+        # 7. Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, organization.id))
         
         return created_pickup
 
@@ -136,6 +157,8 @@ class PickupService:
         db.commit()
         db.refresh(updated_pickup)
         
+        # Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup
 
     @staticmethod
@@ -189,6 +212,23 @@ class PickupService:
         
         db.commit()
         db.refresh(updated_pickup)
+
+        # Broadcast Realtime Event
+        asyncio.create_task(pubsub_service.publish(
+            f"analytics:org_{updated_pickup.organization_id}",
+            {
+                "event": "pickup_cancelled",
+                "organization_id": updated_pickup.organization_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {
+                    "pickup_id": updated_pickup.id,
+                    "status": "cancelled"
+                }
+            }
+        ))
+
+        # Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup
 
     @staticmethod
@@ -220,6 +260,8 @@ class PickupService:
         
         db.commit()
         db.refresh(updated_pickup)
+        # Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup
 
     @staticmethod
@@ -247,6 +289,8 @@ class PickupService:
         
         db.commit()
         db.refresh(updated_pickup)
+        # Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup
 
     @staticmethod
@@ -275,6 +319,8 @@ class PickupService:
         
         db.commit()
         db.refresh(updated_pickup)
+        # Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup
 
     @staticmethod
@@ -302,4 +348,22 @@ class PickupService:
         
         db.commit()
         db.refresh(updated_pickup)
+
+        # Broadcast Realtime Event
+        asyncio.create_task(pubsub_service.publish(
+            f"analytics:org_{updated_pickup.organization_id}",
+            {
+                "event": "pickup_completed",
+                "organization_id": updated_pickup.organization_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": {
+                    "pickup_id": updated_pickup.id,
+                    "actual_weight": updated_pickup.actual_weight,
+                    "status": "completed"
+                }
+            }
+        ))
+
+        # Trigger Live Dashboard KPI Refresh
+        asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup

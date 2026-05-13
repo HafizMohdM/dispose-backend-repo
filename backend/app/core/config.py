@@ -76,3 +76,15 @@ TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_SL2t52a6r7GIcE")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "wk1foVV2bXcbmmnb8CjsPdiR")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "AF_WAZvdyR3TG@d")
+
+# ========================
+# REDIS & CELERY CONFIGURATION
+# ========================
+
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+

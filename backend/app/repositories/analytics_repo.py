@@ -1,240 +1,138 @@
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
-
-from sqlalchemy.orm import Session
-from sqlalchemy import select, func, and_, case, desc
-
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, and_, desc, extract, case, text
+import sqlalchemy as sa
+from typing import List, Optional, Dict, Any
+from app.models.analytics import AnalyticsEvent, DailyMetric, PickupMetric, DriverMetric, RevenueMetric
+from app.models.pickup import Pickup, PickupStatus, WasteType
 from app.models.user import User
-from app.models.driver import Driver, DriverAvailability
-from app.models.pickup import Pickup
-from app.models.notification import Notification
-from app.models.subscription import Subscription
+from app.models.organization import Organization
+from app.models.payment import Payment, PaymentStatus
+from app.models.invoice import Invoice
+from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.audit_log import AuditLog
-
-from app.utils.enums import (
-    DriverStatus,
-    DriverAvailabilityStatus,
-    NotificationStatus,
-)
-
+from datetime import datetime, timedelta, date
+from decimal import Decimal
+from app.utils.query_utils import PaginationParams, paginate_query
 
 class AnalyticsRepository:
+    @staticmethod
+    def get_dashboard_kpis(db: Session, org_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None):
+        # Base filters
+        pickup_filter = []
+        if org_id:
+            pickup_filter.append(Pickup.organization_id == org_id)
+        if start_date:
+            pickup_filter.append(Pickup.created_at >= start_date)
+        if end_date:
+            pickup_filter.append(Pickup.created_at <= end_date)
 
-    def __init__(self, db: Session):
-        self.db = db
+        # 1. Optimized Pickup Stats using single query
+        pickup_stats = db.query(
+            func.count(Pickup.id).label("total"),
+            func.sum(case((Pickup.status == PickupStatus.COMPLETED, 1), else_=0)).label("completed"),
+            func.sum(case((Pickup.status == PickupStatus.PENDING, 1), else_=0)).label("pending"),
+            func.sum(case((Pickup.status == PickupStatus.CANCELLED, 1), else_=0)).label("cancelled")
+        ).filter(*pickup_filter).first()
 
- 
+        # 2. Revenue (Current Month or Range)
+        rev_filter = [Payment.status == PaymentStatus.SUCCESS]
+        if org_id:
+            rev_filter.append(Invoice.organization_id == org_id)
+        
+        if start_date:
+            rev_filter.append(Payment.created_at >= start_date)
+        else:
+            rev_filter.append(Payment.created_at >= date.today().replace(day=1))
+            
+        if end_date:
+            rev_filter.append(Payment.created_at <= end_date)
 
-    def get_user_counts(self, organization_id: int) -> Dict:
+        monthly_revenue = db.query(func.sum(Payment.amount)).join(Invoice).filter(*rev_filter).scalar() or Decimal("0.00")
 
-        total_users = self.db.scalar(
-            select(func.count(User.id))
-            .where(User.organization_id == organization_id)
-        ) or 0
+        # 3. Failed Payments
+        failed_filter = [Payment.status == PaymentStatus.FAILED]
+        if org_id:
+            failed_filter.append(Invoice.organization_id == org_id)
+        failed_payments = db.query(func.count(Payment.id)).join(Invoice).filter(*failed_filter).scalar() or 0
 
-        active_users = self.db.scalar(
-            select(func.count(User.id))
-            .where(
-                User.organization_id == organization_id,
-                User.is_active == True
-            )
-        ) or 0
+        # 4. Active Subscriptions
+        active_subs = db.query(func.count(Subscription.id)).filter(
+            Subscription.organization_id == org_id if org_id else True,
+            Subscription.status == SubscriptionStatus.ACTIVE
+        ).scalar() or 0
 
         return {
-            "total_users": total_users,
-            "active_users": active_users,
+            "total_pickups": pickup_stats.total or 0,
+            "completed_pickups": pickup_stats.completed or 0,
+            "pending_pickups": pickup_stats.pending or 0,
+            "cancelled_pickups": pickup_stats.cancelled or 0,
+            "monthly_revenue": monthly_revenue,
+            "active_subscriptions": active_subs,
+            "failed_payments": failed_payments,
+            "active_drivers": 0, 
+            "inactive_drivers": 0,
+            "total_organizations": db.query(func.count(Organization.id)).scalar() if not org_id else 1
         }
 
-  
+    @staticmethod
+    def get_pickup_trends(db: Session, org_id: Optional[int], start_date: date, end_date: date, pagination: Optional[PaginationParams] = None):
+        query = db.query(
+            func.date(Pickup.created_at).label("date"),
+            func.count(Pickup.id).label("count")
+        ).filter(
+            Pickup.organization_id == org_id if org_id else True,
+            func.date(Pickup.created_at) >= start_date,
+            func.date(Pickup.created_at) <= end_date
+        ).group_by(func.date(Pickup.created_at)).order_by(desc("date"))
+        
+        if pagination:
+            return paginate_query(query, pagination)
+        return query.all()
 
-    def get_driver_counts(self, organization_id: int) -> Dict:
+    @staticmethod
+    def get_status_distribution(db: Session, org_id: Optional[int], start_date: Optional[date] = None, end_date: Optional[date] = None):
+        filters = []
+        if org_id: filters.append(Pickup.organization_id == org_id)
+        if start_date: filters.append(func.date(Pickup.created_at) >= start_date)
+        if end_date: filters.append(func.date(Pickup.created_at) <= end_date)
+        
+        return db.query(
+            Pickup.status,
+            func.count(Pickup.id)
+        ).filter(*filters).group_by(Pickup.status).all()
 
-        total_drivers = self.db.scalar(
-            select(func.count(Driver.id))
-            .where(
-                Driver.organization_id == organization_id,
-                Driver.status != DriverStatus.DELETED
-            )
-        ) or 0
+    @staticmethod
+    def get_waste_type_distribution(db: Session, org_id: Optional[int], start_date: Optional[date] = None, end_date: Optional[date] = None):
+        filters = []
+        if org_id: filters.append(Pickup.organization_id == org_id)
+        if start_date: filters.append(func.date(Pickup.created_at) >= start_date)
+        if end_date: filters.append(func.date(Pickup.created_at) <= end_date)
+        
+        return db.query(
+            Pickup.waste_type,
+            func.count(Pickup.id)
+        ).filter(*filters).group_by(Pickup.waste_type).all()
 
-        active_drivers = self.db.scalar(
-            select(func.count(Driver.id))
-            .where(
-                Driver.organization_id == organization_id,
-                Driver.status == DriverStatus.ACTIVE
-            )
-        ) or 0
+    @staticmethod
+    def get_top_drivers(db: Session, org_id: Optional[int], limit: int = 5):
+        from app.models.pickup_assignment import PickupAssignment
+        return db.query(
+            User.id,
+            User.mobile.label("name"),
+            func.count(Pickup.id).label("completed_count"),
+            func.sum(Pickup.waste_weight).label("total_weight")
+        ).join(PickupAssignment, PickupAssignment.driver_id == User.id)\
+         .join(Pickup, Pickup.id == PickupAssignment.pickup_id)\
+         .filter(
+             Pickup.status == PickupStatus.COMPLETED,
+             Pickup.organization_id == org_id if org_id else True
+         ).group_by(User.id).order_by(desc("completed_count")).limit(limit).all()
 
-        available_drivers = self.db.scalar(
-            select(func.count(DriverAvailability.id))
-            .join(Driver)
-            .where(
-                Driver.organization_id == organization_id,
-                DriverAvailability.status == DriverAvailabilityStatus.AVAILABLE,
-                DriverAvailability.is_on_duty == True
-            )
-        ) or 0
-
-        busy_drivers = self.db.scalar(
-            select(func.count(DriverAvailability.id))
-            .join(Driver)
-            .where(
-                Driver.organization_id == organization_id,
-                DriverAvailability.status == DriverAvailabilityStatus.BUSY
-            )
-        ) or 0
-
-        offline_drivers = self.db.scalar(
-            select(func.count(DriverAvailability.id))
-            .join(Driver)
-            .where(
-                Driver.organization_id == organization_id,
-                DriverAvailability.status == DriverAvailabilityStatus.OFFLINE
-            )
-        ) or 0
-
+    @staticmethod
+    def get_security_stats(db: Session, limit: int = 100):
+        # Optimized with direct counts
         return {
-            "total_drivers": total_drivers,
-            "active_drivers": active_drivers,
-            "available_drivers": available_drivers,
-            "busy_drivers": busy_drivers,
-            "offline_drivers": offline_drivers,
-        }
-
-
-    def get_pickup_counts(self, organization_id: int) -> Dict:
-
-        total_pickups = self.db.scalar(
-            select(func.count(Pickup.id))
-            .where(Pickup.organization_id == organization_id)
-        ) or 0
-
-        completed_pickups = self.db.scalar(
-            select(func.count(Pickup.id))
-            .where(
-                Pickup.organization_id == organization_id,
-                Pickup.status == "COMPLETED"
-            )
-        ) or 0
-
-        cancelled_pickups = self.db.scalar(
-            select(func.count(Pickup.id))
-            .where(
-                Pickup.organization_id == organization_id,
-                Pickup.status == "CANCELLED"
-            )
-        ) or 0
-
-        pending_pickups = self.db.scalar(
-            select(func.count(Pickup.id))
-            .where(
-                Pickup.organization_id == organization_id,
-                Pickup.status == "CREATED"
-            )
-        ) or 0
-
-        completion_rate = (
-            (completed_pickups / total_pickups) * 100
-            if total_pickups > 0 else 0
-        )
-
-        return {
-            "total_pickups": total_pickups,
-            "completed_pickups": completed_pickups,
-            "cancelled_pickups": cancelled_pickups,
-            "pending_pickups": pending_pickups,
-            "completion_rate": round(completion_rate, 2),
-        }
-
-   
-
-    def get_notification_counts(self, organization_id: int) -> Dict:
-
-        total_notifications = self.db.scalar(
-            select(func.count(Notification.id))
-            .where(Notification.organization_id == organization_id)
-        ) or 0
-
-        unread_notifications = self.db.scalar(
-            select(func.count(Notification.id))
-            .where(
-                Notification.organization_id == organization_id,
-                Notification.status == NotificationStatus.UNREAD
-            )
-        ) or 0
-
-        read_notifications = self.db.scalar(
-            select(func.count(Notification.id))
-            .where(
-                Notification.organization_id == organization_id,
-                Notification.status == NotificationStatus.READ
-            )
-        ) or 0
-
-        read_rate = (
-            (read_notifications / total_notifications) * 100
-            if total_notifications > 0 else 0
-        )
-
-        return {
-            "total_notifications": total_notifications,
-            "unread_notifications": unread_notifications,
-            "read_notifications": read_notifications,
-            "read_rate": round(read_rate, 2),
-        }
-
-
-    def get_subscription_counts(self, organization_id: int) -> Dict:
-
-        active_subscriptions = self.db.scalar(
-            select(func.count(Subscription.id))
-            .where(
-                Subscription.organization_id == organization_id,
-                Subscription.status == "ACTIVE"
-            )
-        ) or 0
-
-        expired_subscriptions = self.db.scalar(
-            select(func.count(Subscription.id))
-            .where(
-                Subscription.organization_id == organization_id,
-                Subscription.status == "EXPIRED"
-            )
-        ) or 0
-
-        return {
-            "active_subscriptions": active_subscriptions,
-            "expired_subscriptions": expired_subscriptions,
-        }
-
-  
-
-    def get_user_activity_counts(self, organization_id: int) -> Dict:
-
-        today = datetime.utcnow().date()
-
-        logins_today = self.db.scalar(
-            select(func.count(AuditLog.id))
-            .where(
-                AuditLog.org_id == organization_id,
-                AuditLog.action == "login",
-                func.date(AuditLog.created_at) == today
-            )
-        ) or 0
-
-        return {
-            "logins_today": logins_today,
-        }
-
-
-
-    def get_dashboard_summary(self, organization_id: int) -> Dict:
-
-        return {
-            "users": self.get_user_counts(organization_id),
-            "drivers": self.get_driver_counts(organization_id),
-            "pickups": self.get_pickup_counts(organization_id),
-            "notifications": self.get_notification_counts(organization_id),
-            "subscriptions": self.get_subscription_counts(organization_id),
-            "activity": self.get_user_activity_counts(organization_id),
+            "failed_logins": db.query(func.count(AuditLog.id)).filter(AuditLog.event_type == "LOGIN_FAILED").scalar() or 0,
+            "suspicious_actions": db.query(func.count(AuditLog.id)).filter(AuditLog.event_type == "SUSPICIOUS_ACTIVITY").scalar() or 0,
+            "admin_actions": db.query(AuditLog.event_type, func.count(AuditLog.id)).group_by(AuditLog.event_type).all()
         }

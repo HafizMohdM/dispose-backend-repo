@@ -22,6 +22,10 @@ from app.models.subscription_usage import SubscriptionUsage
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.subscription_repo import SubscriptionRepository
 from app.services.audit_service import AuditService
+from app.core.pubsub import pubsub_service
+from app.services.realtime.realtime_dashboard_service import dashboard_throttler
+import asyncio
+
 
 class PaymentService:
     
@@ -323,6 +327,37 @@ class PaymentService:
                 org_id=invoice.organization_id,
                 meta={"payment_id": str(payment.id), "invoice_id": str(invoice.id)}
             )
+
+            # Broadcast Realtime Event
+            asyncio.create_task(pubsub_service.publish(
+                f"analytics:org_{invoice.organization_id}",
+                {
+                    "event": "payment_success",
+                    "organization_id": invoice.organization_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "payment_id": str(payment.id),
+                        "amount": float(payment.amount),
+                        "status": "success"
+                    }
+                }
+            ))
+            
+            # Broadcast Revenue Update Event
+            asyncio.create_task(pubsub_service.publish(
+                f"analytics:org_{invoice.organization_id}",
+                {
+                    "event": "revenue_updated",
+                    "organization_id": invoice.organization_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "increment": float(payment.amount)
+                    }
+                }
+            ))
+
+            # Trigger Live Dashboard KPI Refresh
+            asyncio.create_task(dashboard_throttler.trigger_update(db, invoice.organization_id))
             
         elif event == "payment.failed" or gateway_status == "FAILED":
             payment.status = PaymentStatus.FAILED
@@ -335,6 +370,20 @@ class PaymentService:
                 org_id=invoice.organization_id,
                 meta={"payment_id": str(payment.id), "invoice_id": str(invoice.id)}
             )
+
+            # Broadcast Realtime Event
+            asyncio.create_task(pubsub_service.publish(
+                f"analytics:org_{invoice.organization_id}",
+                {
+                    "event": "payment_failed",
+                    "organization_id": invoice.organization_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data": {
+                        "payment_id": str(payment.id),
+                        "status": "failed"
+                    }
+                }
+            ))
         else:
             payment_event.processing_status = "UNKNOWN_GATEWAY_STATUS"
             db.commit()

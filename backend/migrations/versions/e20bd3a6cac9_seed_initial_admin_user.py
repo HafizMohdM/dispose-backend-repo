@@ -15,7 +15,7 @@ branch_labels = None
 depends_on = None
 
 
-ADMIN_MOBILE = "9999999999"
+ADMIN_MOBILE = "+91 9025570209"
 
 
 def upgrade():

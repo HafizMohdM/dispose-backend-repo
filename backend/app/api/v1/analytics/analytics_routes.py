@@ -16,7 +16,7 @@ from sqlalchemy import desc, func
 router = APIRouter()
 
 
-@router.get("/dashboard", response_model=DashboardResponse, tags=["Analytics Dashboard"])
+@router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard_summary(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
@@ -29,7 +29,7 @@ async def get_dashboard_summary(
     org = get_user_org(db, current_user)
     return await AnalyticsService.get_dashboard_summary(db, org.id if org else None, start_date, end_date)
 
-@router.get("/pickups", response_model=PickupAnalyticsResponse, tags=["Analytics Dashboard"])
+@router.get("/pickups", response_model=PickupAnalyticsResponse)
 async def get_pickup_analytics(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
@@ -42,7 +42,7 @@ async def get_pickup_analytics(
     org = get_user_org(db, current_user)
     return await AnalyticsService.get_pickup_analytics(db, org.id if org else None, start_date, end_date)
 
-@router.get("/drivers", response_model=DriverAnalyticsResponse, tags=["Analytics Dashboard"])
+@router.get("/drivers", response_model=DriverAnalyticsResponse)
 async def get_driver_analytics(
     db: Session = Depends(get_db),
     current_user = Depends(require_permission("analytics.view"))
@@ -53,7 +53,7 @@ async def get_driver_analytics(
     org = get_user_org(db, current_user)
     return await AnalyticsService.get_driver_analytics(db, org.id if org else None)
 
-@router.get("/security", response_model=SecurityAnalyticsResponse, tags=["Analytics Dashboard"])
+@router.get("/security", response_model=SecurityAnalyticsResponse)
 async def get_security_analytics(
     db: Session = Depends(get_db),
     current_user = Depends(require_permission("analytics.admin"))
@@ -63,7 +63,7 @@ async def get_security_analytics(
     """
     return await AnalyticsService.get_security_analytics(db)
 
-@router.get("/revenue", response_model=RevenueAnalyticsResponse, tags=["Analytics Dashboard"])
+@router.get("/revenue", response_model=RevenueAnalyticsResponse)
 async def get_revenue_analytics(
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
@@ -73,7 +73,7 @@ async def get_revenue_analytics(
     org = get_user_org(db, current_user)
     return await AnalyticsService.get_revenue_analytics(db, org.id if org else None, start_date, end_date)
 
-@router.get("/subscriptions", response_model=SubscriptionAnalyticsResponse, tags=["Analytics Dashboard"])
+@router.get("/subscriptions", response_model=SubscriptionAnalyticsResponse)
 async def get_subscription_analytics(
     db: Session = Depends(get_db),
     current_user = Depends(require_permission("analytics.view"))
@@ -88,7 +88,7 @@ async def get_subscription_analytics(
         "plan_distribution": {}
     }
 
-@router.get("/snapshots/summary", tags=["KPI Snapshots"])
+@router.get("/snapshots/summary")
 async def get_kpi_snapshots(
     db: Session = Depends(get_db),
     current_user = Depends(require_permission("analytics.view"))

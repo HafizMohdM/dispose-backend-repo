@@ -8,7 +8,7 @@ from app.api.v1.organizations.member_schemas import MemberCreate, MemberUpdate, 
 from app.services.organization_member_service import OrganizationMemberService
 from typing import List
 
-router = APIRouter(prefix="/{org_id}/members", tags=["Organization Members"])
+router = APIRouter()
 
 @router.get(
     "",

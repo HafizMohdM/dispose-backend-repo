@@ -1,0 +1,6 @@
+@echo off
+echo Activating Virtual Environment...
+call venv\Scripts\activate.bat
+echo Starting Uvicorn server...
+uvicorn app.main:app --reload
+pause

@@ -42,6 +42,8 @@ class Pickup(Base, TimestampMixin):
     assignments = relationship("PickupAssignment", back_populates="pickup", cascade="all, delete-orphan")
     media = relationship("PickupMedia", back_populates="pickup", cascade="all, delete-orphan")
 
+    exceptions = relationship("PickupException", back_populates="pickup", cascade="all, delete-orphan")
+
     __table_args__ = (
         CheckConstraint("waste_weight >= 0", name="check_waste_weight_non_negative"),
         Index("ix_pickups_org_status", "organization_id", "status"),

@@ -9,7 +9,7 @@ from app.api.v1.organizations.category_schemas import (
 )
 from app.core.permissions import require_permission
 
-router = APIRouter(prefix="/org-categories")
+router = APIRouter()
 
 
 @router.post("", response_model=CategoryResponse)

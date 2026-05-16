@@ -15,7 +15,7 @@ from app.api.v1.notifications.notification_schemas import (
     NotificationReadAllResponse,
 )
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+router = APIRouter()
 
 
 @router.get(

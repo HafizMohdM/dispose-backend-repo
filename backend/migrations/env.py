@@ -23,6 +23,7 @@ from app.models import pickup_assignment
 from app.models import pickup_media
 from app.models import invoice
 from app.models import payment
+from app.models import pickup_exception
 from alembic import context
 
 # this is the Alembic Config object, which provides

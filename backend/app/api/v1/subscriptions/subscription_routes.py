@@ -18,7 +18,7 @@ from app.api.v1.subscriptions.subscription_schemas import (
 )
 from app.services.subscription_service import SubscriptionService
 
-router = APIRouter(prefix="/subscription", tags=["Subscriptions"])
+router = APIRouter()
 
 @router.get("/plans", response_model=list[PlanResponse])
 def get_plans(

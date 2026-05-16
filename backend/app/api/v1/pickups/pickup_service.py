@@ -2,6 +2,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 
+
+
+
 from app.repositories.pickup_repo import PickupRepository
 from app.repositories.subscription_repo import SubscriptionRepository
 from app.models.pickup import Pickup, PickupStatus
@@ -18,6 +21,11 @@ from app.services.audit_service import log_event
 from app.core.pubsub import pubsub_service
 from app.services.realtime.realtime_dashboard_service import dashboard_throttler
 import asyncio
+
+
+from app.models.pickup_exception import PickupException
+from app.api.v1.pickups.pickup_exception_schemas import PickupExceptionCreateRequest
+from app.repositories.pickup_exception_repo import PickupExceptionRepository
 
 
 class PickupService:
@@ -367,3 +375,88 @@ class PickupService:
         # Trigger Live Dashboard KPI Refresh
         asyncio.create_task(dashboard_throttler.trigger_update(db, updated_pickup.organization_id))
         return updated_pickup
+
+    # ==================== EXCEPTION METHODS ====================
+
+    @staticmethod
+    def report_exception(
+        db: Session, 
+        pickup_id: int, 
+        request: PickupExceptionCreateRequest, 
+        reported_by_id: int
+    ) -> PickupException:
+        """
+        Report an exception for a pickup (Gate locked, Customer not present, etc.)
+        """
+        # Validate pickup exists and is in valid state
+        pickup = PickupService.get_pickup_by_id(db, pickup_id)
+        
+        # Optional: Restrict exceptions to certain statuses
+        if pickup.status in [PickupStatus.COMPLETED, PickupStatus.CANCELLED]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Cannot report exception on completed or cancelled pickup"
+            )
+
+        exception = PickupExceptionRepository.create_exception(
+            db=db,
+            pickup_id=pickup_id,
+            exception_type=request.exception_type,
+            notes=request.notes,
+            reported_by_id=reported_by_id
+        )
+
+        # Log the event
+        log_event(
+            db=db,
+            user_id=reported_by_id,
+            action="REPORT_EXCEPTION",
+            org_id=pickup.organization_id,
+            metadata={
+                "entity_type": "pickup_exception",
+                "pickup_id": pickup_id,
+                "exception_type": request.exception_type.value,
+                "notes": request.notes
+            }
+        )
+
+        # Trigger realtime update
+        asyncio.create_task(dashboard_throttler.trigger_update(db, pickup.organization_id))
+
+        return exception
+
+
+    @staticmethod
+    def resolve_exception(
+        db: Session, 
+        exception_id: int, 
+        resolved_by_id: int
+    ) -> PickupException:
+        """
+        Mark an exception as resolved
+        """
+        exception = PickupExceptionRepository.resolve_exception(
+            db=db, 
+            exception_id=exception_id, 
+            resolved_by_id=resolved_by_id
+        )
+
+        # Get pickup for logging and realtime
+        pickup = PickupService.get_pickup_by_id(db, exception.pickup_id)
+
+        log_event(
+            db=db,
+            user_id=resolved_by_id,
+            action="RESOLVE_EXCEPTION",
+            org_id=pickup.organization_id,
+            metadata={
+                "entity_type": "pickup_exception",
+                "exception_id": exception_id,
+                "pickup_id": exception.pickup_id,
+                "exception_type": exception.exception_type.value
+            }
+        )
+
+        asyncio.create_task(dashboard_throttler.trigger_update(db, pickup.organization_id))
+
+        return exception

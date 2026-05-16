@@ -21,11 +21,17 @@ from app.api.v1.pickups.pickup_service import PickupService
 from app.models.pickup import PickupStatus
 from app.models.pickup_assignment import AssignmentStatus
 from app.models.user import User
+from app.api.v1.pickups.pickup_exception_schemas import (
+    PickupExceptionCreateRequest,
+    PickupExceptionResponse,
+    PickupExceptionListResponse
+)
+from app.repositories.pickup_exception_repo import PickupExceptionRepository
 
 from app.core.dependencies import get_db, get_user_org
 from app.core.permissions import require_permission
 
-router = APIRouter(prefix="/pickups", tags=["Pickups"])
+router = APIRouter()
 
 @router.post("/", response_model=PickupResponse, status_code=status.HTTP_201_CREATED)
 def create_pickup(
@@ -198,5 +204,48 @@ def complete_pickup(
     Driver completes a pickup and submits the actual weight.
     """
     return PickupService.complete_pickup(db, pickup_id, request, current_user)
+
+
+# ==================== EXCEPTION ENDPOINTS ====================
+
+@router.post("/{pickup_id}/exceptions", response_model=PickupExceptionResponse, status_code=status.HTTP_201_CREATED)
+def report_exception(
+    pickup_id: int,
+    request: PickupExceptionCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    """Report an exception during pickup (Gate locked, Customer absent, etc.)"""
+    return PickupService.report_exception(
+        db=db, 
+        pickup_id=pickup_id, 
+        request=request, 
+        reported_by_id=current_user.id
+    )
+
+
+@router.get("/{pickup_id}/exceptions", response_model=PickupExceptionListResponse)
+def get_pickup_exceptions(
+    pickup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.view"))
+):
+    """Get all exceptions reported for a specific pickup"""
+    exceptions = PickupExceptionRepository.get_exceptions_by_pickup(db, pickup_id)
+    return {"exceptions": exceptions, "total": len(exceptions)}
+
+
+@router.post("/exceptions/{exception_id}/resolve", response_model=PickupExceptionResponse)
+def resolve_exception(
+    exception_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    """Mark an exception as resolved (Admin / Dispatcher)"""
+    return PickupService.resolve_exception(
+        db=db, 
+        exception_id=exception_id, 
+        resolved_by_id=current_user.id
+    )
 
 

@@ -20,7 +20,7 @@ from app.api.v1.payments.payment_schemas import (
 )
 from app.services.payment_service import PaymentService
 
-router = APIRouter(prefix="/payments", tags=["Payments & Invoicing"])
+router = APIRouter()
 
 @router.get("/invoices", response_model=List[InvoiceResponse])
 def get_my_invoices(

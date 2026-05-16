@@ -14,7 +14,7 @@ from app.api.v1.admin.rbac_schemas import (
 )
 from app.services.rbac_service import RBACService
 
-router = APIRouter(prefix="/roles", tags=["Admin Roles & Permissions"])
+router = APIRouter()
 
 @router.get("/", response_model=List[RoleResponseSchema])
 def list_roles(

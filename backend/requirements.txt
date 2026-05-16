@@ -11,4 +11,9 @@ razorpay
 twilio
 celery
 redis
-flower
+flower
+reportlab
+sentry-sdk
+prometheus-fastapi-instrumentator
+watchfiles
+ortools 

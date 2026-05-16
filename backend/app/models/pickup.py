@@ -17,6 +17,11 @@ class PickupStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
 
+class PickupPriority(str, enum.Enum):
+    HIGH = "HIGH"
+    NORMAL = "NORMAL"
+    LOW = "LOW"
+
 class Pickup(Base, TimestampMixin):
     __tablename__ = "pickups"
 
@@ -32,6 +37,7 @@ class Pickup(Base, TimestampMixin):
     longitude = Column(Float, nullable=False)
     
     status = Column(Enum(PickupStatus), default=PickupStatus.PENDING, nullable=False, index=True)
+    priority = Column(Enum(PickupPriority), default=PickupPriority.NORMAL, nullable=False, index=True)
     
     scheduled_at = Column(DateTime, nullable=True, index=True)
     completed_at = Column(DateTime, nullable=True)
@@ -42,8 +48,10 @@ class Pickup(Base, TimestampMixin):
     assignments = relationship("PickupAssignment", back_populates="pickup", cascade="all, delete-orphan")
     media = relationship("PickupMedia", back_populates="pickup", cascade="all, delete-orphan")
 
+    
     exceptions = relationship("PickupException", back_populates="pickup", cascade="all, delete-orphan")
-
+    activities = relationship("PickupActivity", back_populates="pickup", cascade="all, delete-orphan", order_by="desc(PickupActivity.created_at)")
+    
     __table_args__ = (
         CheckConstraint("waste_weight >= 0", name="check_waste_weight_non_negative"),
         Index("ix_pickups_org_status", "organization_id", "status"),

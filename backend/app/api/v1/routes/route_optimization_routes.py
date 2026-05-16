@@ -45,6 +45,16 @@ async def list_routes(
     return RouteOptimizationRepository.get_org_routes(db, org.id, status)
 
 
+@router.get("/active", response_model=List[OptimizedRouteResponse])
+async def get_active_routes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("fleet.view"))
+):
+    """List all currently active optimized routes (ACTIVE, DISPATCHED, IN_PROGRESS)"""
+    org = get_user_org(db, current_user)
+    return RouteOptimizationService.get_active_routes(db, org.id)
+
+
 @router.get("/{route_id}", response_model=OptimizedRouteResponse)
 async def get_route(
     route_id: int,

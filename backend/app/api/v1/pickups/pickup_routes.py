@@ -1,6 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime
+from typing import Optional
 
 from app.core.database import get_db
 from app.core.permissions import require_permission
@@ -9,13 +12,21 @@ from app.api.v1.pickups.pickup_schemas import (
     PickupResponse, 
     PickupUpdateStatusRequest, 
     PickupAssignmentResponse,
-    PickupListResponse
+    PickupListResponse,
+    PickupPriorityUpdateRequest,
+    PickupStatsResponse,
+    PickupImportResponse,
+    PickupMediaResponse
 )
 from app.api.v1.pickups.pickup_workflow_schemas import (
     PickupCancelRequest,
     PickupRescheduleRequest,
     PickupRejectRequest,
-    PickupCompleteRequest
+    PickupCompleteRequest,
+    BulkAssignRequest,
+    BulkCancelRequest,
+    BulkRescheduleRequest,
+    BulkOperationResponse
 )
 from app.api.v1.pickups.pickup_service import PickupService
 from app.models.pickup import PickupStatus
@@ -30,6 +41,10 @@ from app.repositories.pickup_exception_repo import PickupExceptionRepository
 
 from app.core.dependencies import get_db, get_user_org
 from app.core.permissions import require_permission
+
+from app.api.v1.pickups.pickup_activity_schemas import PickupActivityCreateRequest, PickupTimelineResponse, PickupActivityResponse
+from app.repositories.pickup_activity_repo import PickupActivityRepository
+from app.models.pickup_activity import ActivityType
 
 router = APIRouter()
 
@@ -110,6 +125,41 @@ def get_pickup(
                 raise HTTPException(status_code=403, detail="Pickup does not belong to your organization")
                 
     return pickup
+
+@router.get("/stats", response_model=PickupStatsResponse)
+def get_pickup_stats(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.view"))
+):
+    org = get_user_org(db, current_user)
+    stats = PickupService.get_stats(db, org.id, start_date, end_date)
+    return stats
+
+@router.get("/export")
+def export_pickups_csv(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.view"))
+):
+    org = get_user_org(db, current_user)
+    csv_data = PickupService.export_csv(db, org.id)
+    return StreamingResponse(
+        iter([csv_data]), 
+        media_type="text/csv", 
+        headers={"Content-Disposition": f"attachment; filename=pickups_export_{org.id}.csv"}
+    )
+
+@router.post("/import", response_model=PickupImportResponse)
+def import_pickups_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    org = get_user_org(db, current_user)
+    count = PickupService.import_csv(db, org.id, file, current_user)
+    return {"imported_count": count}
+
 
 
 @router.patch("/{pickup_id}/status", response_model=PickupResponse)
@@ -248,4 +298,102 @@ def resolve_exception(
         resolved_by_id=current_user.id
     )
 
+@router.get("/{pickup_id}/timeline", response_model=PickupTimelineResponse)
+def get_pickup_timeline(
+    pickup_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.view"))
+):
+    """Get the complete operational timeline/history of a pickup."""
+    # Ensure pickup exists and user has access
+    PickupService.get_pickup_by_id(db, pickup_id) 
+    
+    activities = PickupActivityRepository.get_timeline(db, pickup_id)
+    return {
+        "pickup_id": pickup_id,
+        "total_events": len(activities),
+        "timeline": activities
+    }
 
+@router.post("/{pickup_id}/activity", response_model=PickupActivityResponse)
+def add_manual_pickup_note(
+    pickup_id: int,
+    request: PickupActivityCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    """Add a manual operational note to the pickup timeline."""
+    pickup = PickupService.get_pickup_by_id(db, pickup_id)
+    
+    activity = PickupActivityRepository.log_activity(
+        db=db,
+        pickup_id=pickup.id,
+        user_id=current_user.id,
+        activity_type=ActivityType.MANUAL_NOTE,
+        description=f"Manual note added by user {current_user.email if hasattr(current_user, 'email') else current_user.id}",
+        notes=request.notes
+    )
+    db.commit()
+    db.refresh(activity)
+    return activity
+
+
+# ==================== BULK DISPATCHER OPERATIONS ====================
+
+@router.post("/bulk-assign", response_model=BulkOperationResponse)
+def bulk_assign_pickups(
+    request: BulkAssignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    """
+    Atomically assign a driver to multiple PENDING pickups.
+    If any pickup fails validation, the entire operation is rolled back.
+    """
+    return PickupService.bulk_assign(db, request, current_user)
+
+
+@router.post("/bulk-cancel", response_model=BulkOperationResponse)
+def bulk_cancel_pickups(
+    request: BulkCancelRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    """
+    Atomically cancel multiple PENDING or ASSIGNED pickups.
+    Rolls back subscription usage. Entire batch fails if any pickup is invalid.
+    """
+    return PickupService.bulk_cancel(db, request, current_user)
+
+
+@router.post("/bulk-reschedule", response_model=BulkOperationResponse)
+def bulk_reschedule_pickups(
+    request: BulkRescheduleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    """
+    Atomically reschedule multiple PENDING or ASSIGNED pickups to a new date/time.
+    Entire batch fails if any pickup is in an invalid state.
+    """
+    return PickupService.bulk_reschedule(db, request, current_user)
+
+
+@router.patch("/{pickup_id}/priority", response_model=PickupResponse)
+def update_pickup_priority(
+    pickup_id: int,
+    request: PickupPriorityUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    return PickupService.update_priority(db, pickup_id, request.priority, current_user)
+
+
+@router.post("/{pickup_id}/images", response_model=PickupMediaResponse)
+def upload_pickup_image(
+    pickup_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("pickup.manage"))
+):
+    return PickupService.upload_pickup_image(db, pickup_id, file, current_user)

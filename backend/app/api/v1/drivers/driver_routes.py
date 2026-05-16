@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -41,6 +41,8 @@ def get_org_id(current_user, request_org_id: Optional[int] = None) -> int:
 )
 def get_available_drivers(
     limit: int = 50,
+    lat: Optional[float] = Query(None),
+    lng: Optional[float] = Query(None),
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -53,6 +55,8 @@ def get_available_drivers(
     drivers = service.get_available_drivers(
         organization_id=org_id,
         limit=limit,
+        lat=lat,
+        lng=lng
     )
 
     return drivers

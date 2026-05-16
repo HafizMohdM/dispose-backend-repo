@@ -1,13 +1,14 @@
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, UploadFile
 from sqlalchemy.orm import Session
 from datetime import datetime
-
-
-
+import csv
+import io
+import uuid
 
 from app.repositories.pickup_repo import PickupRepository
 from app.repositories.subscription_repo import SubscriptionRepository
-from app.models.pickup import Pickup, PickupStatus
+from app.models.pickup import Pickup, PickupStatus, PickupPriority
+from app.models.pickup_media import PickupMedia, MediaType
 from app.models.subscription import SubscriptionStatus
 from app.models.pickup_assignment import AssignmentStatus
 from app.api.v1.pickups.pickup_schemas import PickupCreateRequest, PickupUpdateStatusRequest
@@ -15,17 +16,23 @@ from app.api.v1.pickups.pickup_workflow_schemas import (
     PickupCancelRequest,
     PickupRescheduleRequest,
     PickupRejectRequest,
-    PickupCompleteRequest
+    PickupCompleteRequest,
+    BulkAssignRequest,
+    BulkCancelRequest,
+    BulkRescheduleRequest
 )
 from app.services.audit_service import log_event
 from app.core.pubsub import pubsub_service
 from app.services.realtime.realtime_dashboard_service import dashboard_throttler
 import asyncio
 
-
 from app.models.pickup_exception import PickupException
+from app.services.supabase_client import supabase
 from app.api.v1.pickups.pickup_exception_schemas import PickupExceptionCreateRequest
 from app.repositories.pickup_exception_repo import PickupExceptionRepository
+
+from app.repositories.pickup_activity_repo import PickupActivityRepository
+from app.models.pickup_activity import ActivityType
 
 
 class PickupService:
@@ -76,7 +83,17 @@ class PickupService:
 
         created_pickup = PickupRepository.create_pickup(db, new_pickup)
         
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=created_pickup.id, 
+            user_id=None, # System created / Org Context
+            activity_type=ActivityType.CREATED, 
+            description="Pickup was created and scheduled."
+        )
+
         # 5. Commit atomic transaction
+        db.commit() # Added commit to finalize the creation and the activity log
         db.refresh(created_pickup)
         
         # 6. Broadcast Realtime Event
@@ -162,6 +179,17 @@ class PickupService:
                 pass
 
         updated_pickup = PickupRepository.update_pickup_status(db, pickup_id, new_status)
+        
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user.id, 
+            activity_type=ActivityType.STATUS_UPDATED, 
+            description=f"Status updated from {old_status.value} to {new_status.value}.",
+            metadata_payload={"old_status": old_status.value, "new_status": new_status.value}
+        )
+
         db.commit()
         db.refresh(updated_pickup)
         
@@ -170,7 +198,8 @@ class PickupService:
         return updated_pickup
 
     @staticmethod
-    def assign_driver(db: Session, pickup_id: int, driver_id: int):
+    def assign_driver(db: Session, pickup_id: int, driver_id: int, user=None):
+        # NOTE: Added `user=None` to signature to prevent routing breaks, but captures user if passed.
         # 1. Validate pickup exists and is pending
         pickup = PickupService.get_pickup_by_id(db, pickup_id)
         if pickup.status != PickupStatus.PENDING:
@@ -182,6 +211,17 @@ class PickupService:
         # 3. Transition Pickup state to ASSIGNED
         pickup.status = PickupStatus.ASSIGNED
         
+        # --- INJECT TIMELINE ACTIVITY ---
+        user_id = user.id if user else None
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user_id, 
+            activity_type=ActivityType.ASSIGNED, 
+            description=f"Driver ID {driver_id} was assigned to the pickup.",
+            metadata_payload={"driver_id": driver_id}
+        )
+
         db.commit()
         db.refresh(pickup)
         return assignment
@@ -216,6 +256,17 @@ class PickupService:
             action="CANCEL", 
             org_id=pickup.organization_id, 
             metadata={"entity_type": "pickup", "pickup_id": pickup_id, "reason": request.cancellation_reason}
+        )
+
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user.id, 
+            activity_type=ActivityType.STATUS_UPDATED, 
+            description="Pickup was cancelled.",
+            notes=request.cancellation_reason,
+            metadata_payload={"new_status": "CANCELLED", "reason": request.cancellation_reason}
         )
         
         db.commit()
@@ -265,6 +316,17 @@ class PickupService:
                 "reason": request.reason
             }
         )
+
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user.id, 
+            activity_type=ActivityType.RESCHEDULED, 
+            description=f"Pickup rescheduled from {old_schedule} to {request.new_scheduled_at.isoformat()}.",
+            notes=request.reason,
+            metadata_payload={"old_schedule": old_schedule, "new_schedule": request.new_scheduled_at.isoformat()}
+        )
         
         db.commit()
         db.refresh(updated_pickup)
@@ -293,6 +355,15 @@ class PickupService:
             action="ACCEPT_PICKUP", 
             org_id=pickup.organization_id, 
             metadata={"entity_type": "pickup", "pickup_id": pickup_id}
+        )
+
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user.id, 
+            activity_type=ActivityType.STATUS_UPDATED, 
+            description="Driver accepted the pickup. Status changed to IN_PROGRESS."
         )
         
         db.commit()
@@ -324,6 +395,17 @@ class PickupService:
             org_id=pickup.organization_id, 
             metadata={"entity_type": "pickup", "pickup_id": pickup_id, "reason": request.reason}
         )
+
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user.id, 
+            activity_type=ActivityType.UNASSIGNED, 
+            description="Driver rejected the pickup assignment.",
+            notes=request.reason,
+            metadata_payload={"reason": request.reason}
+        )
         
         db.commit()
         db.refresh(updated_pickup)
@@ -352,6 +434,17 @@ class PickupService:
             action="COMPLETE_PICKUP", 
             org_id=pickup.organization_id, 
             metadata={"entity_type": "pickup", "pickup_id": pickup_id, "actual_weight": request.actual_weight, "notes": request.notes}
+        )
+
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=user.id, 
+            activity_type=ActivityType.STATUS_UPDATED, 
+            description=f"Pickup completed with actual weight {request.actual_weight} kg.",
+            notes=request.notes,
+            metadata_payload={"actual_weight": request.actual_weight}
         )
         
         db.commit()
@@ -420,6 +513,19 @@ class PickupService:
             }
         )
 
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=pickup_id, 
+            user_id=reported_by_id, 
+            activity_type=ActivityType.EXCEPTION_REPORTED, 
+            description=f"Exception reported: {request.exception_type.value}",
+            notes=request.notes,
+            metadata_payload={"exception_type": request.exception_type.value, "exception_id": exception.id}
+        )
+        
+        db.commit() # Added commit for the exception and timeline log to flush together
+
         # Trigger realtime update
         asyncio.create_task(dashboard_throttler.trigger_update(db, pickup.organization_id))
 
@@ -457,6 +563,483 @@ class PickupService:
             }
         )
 
+        # --- INJECT TIMELINE ACTIVITY ---
+        PickupActivityRepository.log_activity(
+            db=db, 
+            pickup_id=exception.pickup_id, 
+            user_id=resolved_by_id, 
+            activity_type=ActivityType.EXCEPTION_RESOLVED, 
+            description=f"Exception resolved: {exception.exception_type.value}",
+            metadata_payload={"exception_id": exception_id, "exception_type": exception.exception_type.value}
+        )
+
+        db.commit()
+
         asyncio.create_task(dashboard_throttler.trigger_update(db, pickup.organization_id))
 
         return exception
+
+    # ==================== BULK OPERATION METHODS ====================
+
+    @staticmethod
+    def bulk_assign(db: Session, request: BulkAssignRequest, user) -> dict:
+        """
+        Atomically assign a single driver to multiple PENDING pickups.
+        If ANY pickup fails validation, the ENTIRE transaction is rolled back.
+        """
+        affected_ids = []
+        try:
+            # 1. Acquire FOR UPDATE locks on all requested pickups in a single query
+            pickups = db.query(Pickup).filter(
+                Pickup.id.in_(request.pickup_ids)
+            ).with_for_update().all()
+
+            # 2. Validate all requested IDs were found
+            found_ids = {p.id for p in pickups}
+            missing_ids = set(request.pickup_ids) - found_ids
+            if missing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Pickup IDs not found: {sorted(missing_ids)}"
+                )
+
+            # 3. Validate every pickup is in PENDING state before any mutation
+            for pickup in pickups:
+                if pickup.status != PickupStatus.PENDING:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Pickup ID {pickup.id} is in '{pickup.status.value}' state. Only PENDING pickups can be assigned. Entire bulk operation aborted."
+                    )
+
+            # 4. Apply mutations: assign driver + transition state + log timeline
+            for pickup in pickups:
+                PickupRepository.assign_driver(db, pickup.id, request.driver_id)
+                pickup.status = PickupStatus.ASSIGNED
+
+                PickupActivityRepository.log_activity(
+                    db=db,
+                    pickup_id=pickup.id,
+                    user_id=user.id,
+                    activity_type=ActivityType.ASSIGNED,
+                    description=f"[BULK] Driver ID {request.driver_id} was assigned to the pickup.",
+                    metadata_payload={"driver_id": request.driver_id, "bulk_operation": True}
+                )
+
+                log_event(
+                    db=db,
+                    user_id=user.id,
+                    action="BULK_ASSIGN",
+                    org_id=pickup.organization_id,
+                    metadata={"entity_type": "pickup", "pickup_id": pickup.id, "driver_id": request.driver_id}
+                )
+
+                affected_ids.append(pickup.id)
+
+            # 5. Atomic commit — all or nothing
+            db.commit()
+
+            # 6. Fire observability hooks for all affected organizations
+            org_ids = {p.organization_id for p in pickups}
+            for org_id in org_ids:
+                asyncio.create_task(pubsub_service.publish(
+                    f"analytics:org_{org_id}",
+                    {
+                        "event": "bulk_assign",
+                        "organization_id": org_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": {"pickup_ids": affected_ids, "driver_id": request.driver_id}
+                    }
+                ))
+                asyncio.create_task(dashboard_throttler.trigger_update(db, org_id))
+
+            return {
+                "operation": "bulk_assign",
+                "affected_count": len(affected_ids),
+                "affected_pickup_ids": affected_ids,
+                "details": {"driver_id": request.driver_id}
+            }
+
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Bulk assign failed due to a system error: {str(e)}"
+            )
+
+    @staticmethod
+    def bulk_cancel(db: Session, request: BulkCancelRequest, user) -> dict:
+        """
+        Atomically cancel multiple PENDING or ASSIGNED pickups.
+        Rolls back subscription usage for each cancelled pickup.
+        If ANY pickup fails validation, the ENTIRE transaction is rolled back.
+        """
+        affected_ids = []
+        try:
+            # 1. Acquire FOR UPDATE locks on all requested pickups
+            pickups = db.query(Pickup).filter(
+                Pickup.id.in_(request.pickup_ids)
+            ).with_for_update().all()
+
+            # 2. Validate all requested IDs were found
+            found_ids = {p.id for p in pickups}
+            missing_ids = set(request.pickup_ids) - found_ids
+            if missing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Pickup IDs not found: {sorted(missing_ids)}"
+                )
+
+            # 3. Validate every pickup is in a cancellable state
+            cancellable_states = [PickupStatus.PENDING, PickupStatus.ASSIGNED]
+            for pickup in pickups:
+                if pickup.status not in cancellable_states:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Pickup ID {pickup.id} is in '{pickup.status.value}' state. Only PENDING or ASSIGNED pickups can be cancelled. Entire bulk operation aborted."
+                    )
+
+            # 4. Apply mutations: cancel + rollback usage + log timeline
+            from app.services.subscription_service import SubscriptionService
+            for pickup in pickups:
+                # Rollback subscription usage
+                try:
+                    SubscriptionService.validate_and_increment_usage(
+                        db=db,
+                        subscription_id=pickup.subscription_id,
+                        pickups=-1,
+                        weight=-pickup.waste_weight,
+                        drivers=0
+                    )
+                except Exception:
+                    # Ignore decrement errors if subscription is missing/deleted
+                    pass
+
+                PickupRepository.update_pickup_status(db, pickup.id, PickupStatus.CANCELLED)
+
+                PickupActivityRepository.log_activity(
+                    db=db,
+                    pickup_id=pickup.id,
+                    user_id=user.id,
+                    activity_type=ActivityType.STATUS_UPDATED,
+                    description="[BULK] Pickup was cancelled.",
+                    notes=request.cancellation_reason,
+                    metadata_payload={"new_status": "CANCELLED", "reason": request.cancellation_reason, "bulk_operation": True}
+                )
+
+                log_event(
+                    db=db,
+                    user_id=user.id,
+                    action="BULK_CANCEL",
+                    org_id=pickup.organization_id,
+                    metadata={"entity_type": "pickup", "pickup_id": pickup.id, "reason": request.cancellation_reason}
+                )
+
+                affected_ids.append(pickup.id)
+
+            # 5. Atomic commit
+            db.commit()
+
+            # 6. Fire observability hooks
+            org_ids = {p.organization_id for p in pickups}
+            for org_id in org_ids:
+                asyncio.create_task(pubsub_service.publish(
+                    f"analytics:org_{org_id}",
+                    {
+                        "event": "bulk_cancel",
+                        "organization_id": org_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": {"pickup_ids": affected_ids, "reason": request.cancellation_reason}
+                    }
+                ))
+                asyncio.create_task(dashboard_throttler.trigger_update(db, org_id))
+
+            return {
+                "operation": "bulk_cancel",
+                "affected_count": len(affected_ids),
+                "affected_pickup_ids": affected_ids,
+                "details": {"reason": request.cancellation_reason}
+            }
+
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Bulk cancel failed due to a system error: {str(e)}"
+            )
+
+    @staticmethod
+    def bulk_reschedule(db: Session, request: BulkRescheduleRequest, user) -> dict:
+        """
+        Atomically reschedule multiple PENDING or ASSIGNED pickups to a new date/time.
+        If ANY pickup fails validation, the ENTIRE transaction is rolled back.
+        """
+        affected_ids = []
+        try:
+            # 1. Acquire FOR UPDATE locks on all requested pickups
+            pickups = db.query(Pickup).filter(
+                Pickup.id.in_(request.pickup_ids)
+            ).with_for_update().all()
+
+            # 2. Validate all requested IDs were found
+            found_ids = {p.id for p in pickups}
+            missing_ids = set(request.pickup_ids) - found_ids
+            if missing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Pickup IDs not found: {sorted(missing_ids)}"
+                )
+
+            # 3. Validate every pickup is in a reschedulable state
+            reschedulable_states = [PickupStatus.PENDING, PickupStatus.ASSIGNED]
+            for pickup in pickups:
+                if pickup.status not in reschedulable_states:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Pickup ID {pickup.id} is in '{pickup.status.value}' state. Only PENDING or ASSIGNED pickups can be rescheduled. Entire bulk operation aborted."
+                    )
+
+            # 4. Apply mutations: update schedule + log timeline
+            for pickup in pickups:
+                old_schedule = pickup.scheduled_at.isoformat() if pickup.scheduled_at else None
+
+                PickupRepository.update_schedule(db, pickup.id, request.new_scheduled_at)
+
+                PickupActivityRepository.log_activity(
+                    db=db,
+                    pickup_id=pickup.id,
+                    user_id=user.id,
+                    activity_type=ActivityType.RESCHEDULED,
+                    description=f"[BULK] Pickup rescheduled from {old_schedule} to {request.new_scheduled_at.isoformat()}.",
+                    notes=request.reason,
+                    metadata_payload={
+                        "old_schedule": old_schedule,
+                        "new_schedule": request.new_scheduled_at.isoformat(),
+                        "bulk_operation": True
+                    }
+                )
+
+                log_event(
+                    db=db,
+                    user_id=user.id,
+                    action="BULK_RESCHEDULE",
+                    org_id=pickup.organization_id,
+                    metadata={
+                        "entity_type": "pickup",
+                        "pickup_id": pickup.id,
+                        "old_schedule": old_schedule,
+                        "new_schedule": request.new_scheduled_at.isoformat(),
+                        "reason": request.reason
+                    }
+                )
+
+                affected_ids.append(pickup.id)
+
+            # 5. Atomic commit
+            db.commit()
+
+            # 6. Fire observability hooks
+            org_ids = {p.organization_id for p in pickups}
+            for org_id in org_ids:
+                asyncio.create_task(pubsub_service.publish(
+                    f"analytics:org_{org_id}",
+                    {
+                        "event": "bulk_reschedule",
+                        "organization_id": org_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "data": {
+                            "pickup_ids": affected_ids,
+                            "new_scheduled_at": request.new_scheduled_at.isoformat(),
+                            "reason": request.reason
+                        }
+                    }
+                ))
+                asyncio.create_task(dashboard_throttler.trigger_update(db, org_id))
+
+            return {
+                "operation": "bulk_reschedule",
+                "affected_count": len(affected_ids),
+                "affected_pickup_ids": affected_ids,
+                "details": {
+                    "new_scheduled_at": request.new_scheduled_at.isoformat(),
+                    "reason": request.reason
+                }
+            }
+
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Bulk reschedule failed due to a system error: {str(e)}"
+            )
+
+    @staticmethod
+    def upload_pickup_image(db: Session, pickup_id: int, file: UploadFile, user) -> "PickupMedia":
+        ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"]
+        if file.content_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, and WebP are allowed.")
+            
+        file_bytes = file.file.read()
+        if len(file_bytes) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Payload Too Large. Maximum file size is 5MB.")
+            
+        pickup = PickupRepository.get_pickup_by_id(db, pickup_id)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+            
+        file_name = f"{uuid.uuid4()}_{file.filename}"
+        path = f"pickups/{pickup.organization_id}/{pickup_id}/{file_name}"
+        
+        try:
+            supabase.storage.from_("media").upload(
+                path=path,
+                file=file_bytes,
+                file_options={"content-type": file.content_type}
+            )
+            media_url = supabase.storage.from_("media").get_public_url(path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Image upload failed: {e}")
+            
+        new_media = PickupMedia(
+            pickup_id=pickup_id,
+            media_url=media_url,
+            media_type=MediaType.IMAGE
+        )
+        db.add(new_media)
+        
+        PickupActivityRepository.log_activity(
+            db=db,
+            pickup_id=pickup_id,
+            user_id=user.id if user else None,
+            activity_type=ActivityType.UPDATED,
+            description="Uploaded proof image.",
+            metadata_payload={"media_url": media_url}
+        )
+        db.commit()
+        db.refresh(new_media)
+        return new_media
+
+    @staticmethod
+    def import_csv(db: Session, organization_id: int, file: UploadFile, user) -> int:
+        from app.repositories.subscription_repo import SubscriptionRepository
+        from app.services.subscription_service import SubscriptionService
+        
+        sub = SubscriptionRepository.get_active_subscription(db, organization_id)
+        if not sub:
+            raise HTTPException(status_code=403, detail="No active subscription found.")
+
+        content = file.file.read().decode("utf-8")
+        csv_reader = csv.DictReader(io.StringIO(content))
+        
+        pickups_to_insert = []
+        total_weight = 0.0
+        for row in csv_reader:
+            try:
+                weight = float(row["waste_weight"])
+                total_weight += weight
+                pickup = Pickup(
+                    organization_id=organization_id,
+                    subscription_id=sub.id,
+                    waste_type=row["waste_type"],
+                    waste_weight=weight,
+                    address=row["address"],
+                    latitude=float(row["latitude"]),
+                    longitude=float(row["longitude"]),
+                    priority=row.get("priority", "NORMAL")
+                )
+                pickups_to_insert.append(pickup)
+            except (KeyError, ValueError) as e:
+                db.rollback()
+                raise HTTPException(status_code=400, detail=f"Invalid CSV format at row: {row}. Error: {e}")
+                
+        if not pickups_to_insert:
+            return 0
+            
+        total_pickups = len(pickups_to_insert)
+            
+        try:
+            SubscriptionService.validate_and_increment_usage(
+                db=db, 
+                subscription_id=sub.id, 
+                pickups=total_pickups, 
+                weight=total_weight, 
+                drivers=0
+            )
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=403, detail=str(e))
+                
+        try:
+            PickupRepository.bulk_insert_pickups(db, pickups_to_insert)
+            for p in pickups_to_insert:
+                PickupActivityRepository.log_activity(
+                    db=db,
+                    pickup_id=p.id,
+                    user_id=user.id if user else None,
+                    activity_type=ActivityType.CREATED,
+                    description="Pickup imported via CSV bulk upload."
+                )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to import batch: {e}")
+            
+        return len(pickups_to_insert)
+
+    @staticmethod
+    def export_csv(db: Session, organization_id: int) -> str:
+        pickups = PickupRepository.get_pickups_for_export(db, organization_id)
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Waste Type", "Weight", "Address", "Status", "Priority", "Created At"])
+        
+        for p in pickups:
+            writer.writerow([
+                p.id, p.waste_type, p.waste_weight, p.address, 
+                p.status.value if p.status else "", 
+                p.priority.value if p.priority else "", 
+                p.created_at.isoformat() if p.created_at else ""
+            ])
+            
+        return output.getvalue()
+
+    @staticmethod
+    def update_priority(db: Session, pickup_id: int, priority: str, user) -> Pickup:
+        pickup = PickupRepository.update_priority(db, pickup_id, priority)
+        if not pickup:
+            raise HTTPException(status_code=404, detail="Pickup not found")
+            
+        PickupActivityRepository.log_activity(
+            db=db,
+            pickup_id=pickup_id,
+            user_id=user.id if user else None,
+            activity_type=ActivityType.UPDATED,
+            description=f"Priority updated to {priority}",
+            metadata_payload={"priority": priority}
+        )
+        
+        db.commit()
+        db.refresh(pickup)
+        
+        asyncio.create_task(pubsub_service.publish(f"org_{pickup.organization_id}", {
+            "type": "pickup_updated",
+            "pickup_id": pickup_id,
+            "status": pickup.status.value,
+            "priority": priority
+        }))
+        asyncio.create_task(dashboard_throttler.trigger_update(db, pickup.organization_id))
+        
+        return pickup
+
+    @staticmethod
+    def get_stats(db: Session, organization_id: int, start_date=None, end_date=None) -> dict:
+        return PickupRepository.get_pickup_stats(db, organization_id, start_date, end_date)

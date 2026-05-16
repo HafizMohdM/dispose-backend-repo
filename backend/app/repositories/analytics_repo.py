@@ -136,3 +136,49 @@ class AnalyticsRepository:
             "suspicious_actions": db.query(func.count(AuditLog.id)).filter(AuditLog.event_type == "SUSPICIOUS_ACTIVITY").scalar() or 0,
             "admin_actions": db.query(AuditLog.event_type, func.count(AuditLog.id)).group_by(AuditLog.event_type).all()
         }
+
+    @staticmethod
+    def get_volume_trends(db: Session, org_id: int, days: int):
+        from sqlalchemy import cast, Date
+        start_date = datetime.utcnow() - timedelta(days=days)
+        
+        query = db.query(
+            func.date_trunc('day', Pickup.created_at).label('date'),
+            func.count(Pickup.id).label('total_pickups'),
+            func.sum(Pickup.waste_weight).label('total_weight')
+        ).filter(
+            Pickup.organization_id == org_id,
+            Pickup.created_at >= start_date
+        ).group_by(
+            func.date_trunc('day', Pickup.created_at)
+        ).order_by(
+            func.date_trunc('day', Pickup.created_at).asc()
+        )
+        return query.all()
+
+    @staticmethod
+    def get_dashboard_metrics(db: Session, org_id: int):
+        from sqlalchemy import case
+        from app.models.pickup_exception import PickupException
+
+        now = datetime.utcnow()
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        sla_breaches = db.query(func.count(PickupException.id)).join(
+            Pickup, Pickup.id == PickupException.pickup_id
+        ).filter(
+            Pickup.organization_id == org_id
+        ).scalar() or 0
+
+        pickup_stats = db.query(
+            func.sum(case((Pickup.status.in_([PickupStatus.PENDING, PickupStatus.ASSIGNED]), 1), else_=0)).label("active"),
+            func.sum(case((and_(Pickup.status == PickupStatus.COMPLETED, Pickup.created_at >= start_of_month), 1), else_=0)).label("completed_month")
+        ).filter(
+            Pickup.organization_id == org_id
+        ).first()
+
+        return {
+            "total_active_pickups": pickup_stats.active or 0,
+            "total_completed_this_month": pickup_stats.completed_month or 0,
+            "sla_breach_count": sla_breaches
+        }

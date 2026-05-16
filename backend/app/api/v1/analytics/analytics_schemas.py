@@ -60,3 +60,16 @@ class SecurityAnalyticsResponse(BaseModel):
     suspicious_actions: int
     admin_activity: List[Dict]
     audit_statistics: Dict[str, int]
+
+class VolumeTrendData(BaseModel):
+    date: date
+    total_pickups: int
+    total_weight: float
+
+class VolumeTrendResponse(BaseModel):
+    trends: List[VolumeTrendData]
+
+class VolumeDashboardMetricsResponse(BaseModel):
+    total_active_pickups: int
+    total_completed_this_month: int
+    sla_breach_count: int

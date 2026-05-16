@@ -45,6 +45,17 @@ class RouteOptimizationRepository:
         return waypoint
 
     @staticmethod
+    def get_active_routes(db: Session, org_id: int) -> List[OptimizedRoute]:
+        """Get all active/dispatched/in_progress routes for an organization"""
+        active_statuses = ["active", "dispatched", "in_progress", "ACTIVE", "DISPATCHED", "IN_PROGRESS"]
+        return db.query(OptimizedRoute).options(
+            joinedload(OptimizedRoute.waypoints)
+        ).filter(
+            OptimizedRoute.organization_id == org_id,
+            OptimizedRoute.status.in_(active_statuses)
+        ).order_by(OptimizedRoute.created_at.desc()).all()
+
+    @staticmethod
     def update_waypoint_status(
         db: Session, 
         waypoint_id: int, 

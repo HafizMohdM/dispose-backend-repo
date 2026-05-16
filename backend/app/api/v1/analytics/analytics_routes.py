@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
@@ -117,3 +117,38 @@ async def get_kpi_snapshots(
         "weekly_pickups": last_week_pickups[0] if last_week_pickups else 0,
         "monthly_growth_percentage": 14.5
     }
+
+from app.repositories.analytics_repo import AnalyticsRepository
+from app.api.v1.analytics.analytics_schemas import VolumeTrendResponse, VolumeDashboardMetricsResponse
+
+@router.get("/pickups/volume", response_model=VolumeTrendResponse)
+async def get_volume_trends(
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user = Depends(require_permission("analytics.view"))
+):
+    """Get time-series volume trends aggregated by day"""
+    org = get_user_org(db, current_user)
+    org_id = org.id if org else None
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization context required")
+    
+    results = AnalyticsRepository.get_volume_trends(db, org_id, days)
+    trends = [
+        {"date": r.date, "total_pickups": r.total_pickups, "total_weight": r.total_weight or 0.0}
+        for r in results
+    ]
+    return {"trends": trends}
+
+@router.get("/pickups/dashboard", response_model=VolumeDashboardMetricsResponse)
+async def get_volume_dashboard(
+    db: Session = Depends(get_db),
+    current_user = Depends(require_permission("analytics.view"))
+):
+    """Get high-level dashboard metrics for volume analytics"""
+    org = get_user_org(db, current_user)
+    org_id = org.id if org else None
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organization context required")
+    
+    return AnalyticsRepository.get_dashboard_metrics(db, org_id)

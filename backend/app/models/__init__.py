@@ -10,9 +10,12 @@ from .subscription_usage import SubscriptionUsage
 from .pickup_assignment import PickupAssignment
 from .pickup_media import PickupMedia
 from .pickup import Pickup
+from .pickup_exception import PickupException
+from .pickup_activity import PickupActivity
 from .audit_log import AuditLog
 from .invoice import Invoice
 from .payment import Payment, PaymentEvent
 from .organization_member import OrganizationMember, MembershipStatus
 from .analytics import AnalyticsEvent, DailyMetric, PickupMetric, DriverMetric, RevenueMetric
 from .materialized_metrics import HourlyMetric, WeeklyMetric, MonthlyMetric
+from .recurring_pickup import RecurringPickup, RecurringFrequency

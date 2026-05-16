@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import Integer
 from app.models.pickup import Pickup, PickupStatus
 from app.models.pickup_assignment import PickupAssignment, AssignmentStatus
 from datetime import datetime
@@ -99,3 +100,49 @@ class PickupRepository:
             pickup.waste_weight = actual_weight
             db.flush()
         return pickup
+
+    @staticmethod
+    def update_priority(db: Session, pickup_id: int, priority: str) -> Pickup:
+        pickup = db.query(Pickup).filter(Pickup.id == pickup_id).first()
+        if pickup:
+            pickup.priority = priority
+            db.flush()
+        return pickup
+
+    @staticmethod
+    def get_pickup_stats(db: Session, org_id: int, start_date: datetime = None, end_date: datetime = None) -> dict:
+        from sqlalchemy import func
+        query = db.query(
+            func.count(Pickup.id).label("total_pickups"),
+            func.sum(Pickup.waste_weight).label("total_weight"),
+            func.sum(func.cast(Pickup.status == PickupStatus.PENDING, Integer)).label("pending"),
+            func.sum(func.cast(Pickup.status == PickupStatus.ASSIGNED, Integer)).label("assigned"),
+            func.sum(func.cast(Pickup.status == PickupStatus.IN_PROGRESS, Integer)).label("in_progress"),
+            func.sum(func.cast(Pickup.status == PickupStatus.COMPLETED, Integer)).label("completed"),
+            func.sum(func.cast(Pickup.status == PickupStatus.CANCELLED, Integer)).label("cancelled")
+        ).filter(Pickup.organization_id == org_id)
+
+        if start_date:
+            query = query.filter(Pickup.created_at >= start_date)
+        if end_date:
+            query = query.filter(Pickup.created_at <= end_date)
+
+        result = query.first()
+        return {
+            "total_pickups": result.total_pickups or 0,
+            "total_weight": result.total_weight or 0.0,
+            "pending": result.pending or 0,
+            "assigned": result.assigned or 0,
+            "in_progress": result.in_progress or 0,
+            "completed": result.completed or 0,
+            "cancelled": result.cancelled or 0
+        }
+
+    @staticmethod
+    def bulk_insert_pickups(db: Session, pickups_list: list[Pickup]):
+        db.add_all(pickups_list)
+        db.flush()
+        
+    @staticmethod
+    def get_pickups_for_export(db: Session, org_id: int):
+        return db.query(Pickup).filter(Pickup.organization_id == org_id).order_by(Pickup.created_at.desc())

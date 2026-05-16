@@ -10,6 +10,7 @@ from app.api.v1.organizations.category_routes import router as category_router
 from app.api.v1.organizations.member_routes import router as member_router
 from app.api.v1.subscriptions.subscription_routes import router as subscription_router
 from app.api.v1.pickups.pickup_routes import router as pickup_router
+from app.api.v1.pickups.recurring_routes import router as recurring_router
 from app.api.v1.drivers.driver_routes import router as driver_router
 from app.api.v1.notifications.notification_routes import router as notification_router
 from app.api.v1.audit.audit_route import router as audit_router
@@ -106,6 +107,11 @@ api_router.include_router(
 api_router.include_router(
     pickup_router,
     prefix="/pickups",
+    tags=["Logistics & Routing"]
+)
+api_router.include_router(
+    recurring_router,
+    prefix="/pickups/recurring",
     tags=["Logistics & Routing"]
 )
 api_router.include_router(

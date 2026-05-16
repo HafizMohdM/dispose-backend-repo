@@ -121,23 +121,70 @@ class DriverRepository:
         self,
         organization_id: UUID,
         limit: int = 50,
+        lat: Optional[float] = None,
+        lng: Optional[float] = None,
     ) -> List[Driver]:
+        
+        from sqlalchemy import func
+        from app.models.pickup_assignment import PickupAssignment, AssignmentStatus
+        from app.models.user import User
+        from app.models.driver import DriverLocation
+        from app.utils.geo_utils import haversine_distance
+
+        # Subquery to obtain the latest location for each driver
+        sub_loc = (
+            select(
+                DriverLocation.driver_id,
+                DriverLocation.latitude,
+                DriverLocation.longitude
+            )
+            .distinct(DriverLocation.driver_id)
+            .order_by(DriverLocation.driver_id, DriverLocation.recorded_at.desc())
+            .subquery()
+        )
 
         stmt = (
-            select(Driver)
+            select(
+                Driver, 
+                func.count(PickupAssignment.id).label("active_workload"),
+                sub_loc.c.latitude,
+                sub_loc.c.longitude
+            )
             .join(
                 DriverAvailability,
                 DriverAvailability.driver_id == Driver.id,
             )
+            .outerjoin(User, User.mobile == Driver.mobile)
+            .outerjoin(PickupAssignment, (PickupAssignment.driver_id == User.id) & (PickupAssignment.status.in_([AssignmentStatus.ASSIGNED, AssignmentStatus.IN_PROGRESS])))
+            .outerjoin(sub_loc, sub_loc.c.driver_id == Driver.id)
             .where(
                 Driver.organization_id == organization_id,
                 Driver.status == DriverStatus.ACTIVE,
                 DriverAvailability.status == DriverAvailabilityStatus.AVAILABLE,
                 DriverAvailability.is_on_duty == True,
             )
+            .group_by(Driver.id, sub_loc.c.latitude, sub_loc.c.longitude)
             .limit(limit)
         )
-        return list(self.db.scalars(stmt).all())
+        
+        results = self.db.execute(stmt).all()
+        drivers = []
+        for driver, workload, loc_lat, loc_lng in results:
+            driver.active_workload = workload
+            if lat is not None and lng is not None:
+                if loc_lat is not None and loc_lng is not None:
+                    driver.distance_meters = haversine_distance(lat, lng, loc_lat, loc_lng)
+                else:
+                    driver.distance_meters = float('inf')
+            else:
+                driver.distance_meters = None
+                
+            drivers.append(driver)
+            
+        if lat is not None and lng is not None:
+            drivers.sort(key=lambda d: d.distance_meters if d.distance_meters is not None else float('inf'))
+            
+        return drivers
 
     def get_driver_availability(
         self,

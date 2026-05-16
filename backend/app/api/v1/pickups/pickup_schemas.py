@@ -22,6 +22,7 @@ class PickupResponse(BaseModel):
     latitude: float
     longitude: float
     status: PickupStatus
+    priority: str
     scheduled_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
@@ -44,3 +45,26 @@ class PickupAssignmentResponse(BaseModel):
 class PickupListResponse(BaseModel):
     pickups: List[PickupResponse]
     total: int
+
+class PickupPriorityUpdateRequest(BaseModel):
+    priority: str
+
+class PickupStatsResponse(BaseModel):
+    total_pickups: int
+    pending: int
+    assigned: int
+    in_progress: int
+    completed: int
+    cancelled: int
+    total_weight: float
+
+class PickupImportResponse(BaseModel):
+    imported_count: int
+    
+class PickupMediaResponse(BaseModel):
+    id: int
+    pickup_id: int
+    file_url: str
+    uploaded_at: datetime
+    
+    model_config = {"from_attributes": True}

@@ -18,6 +18,10 @@ celery_app.conf.update(
 
 # Periodic tasks configuration
 celery_app.conf.beat_schedule = {
+    "auto-dispatch-pickups": {
+        "task": "app.services.auto_dispatch.tasks.run_auto_dispatch_all_orgs",
+        "schedule": crontab(minute="*/1"), # Every 1 minute
+    },
     "aggregate-hourly-metrics": {
         "task": "app.services.analytics.tasks.aggregate_hourly_metrics",
         "schedule": crontab(minute=0), # Every hour
@@ -37,4 +41,8 @@ celery_app.conf.beat_schedule = {
 }
 
 
-celery_app.autodiscover_tasks(["app.services.analytics", "app.services.fleet"])
+celery_app.autodiscover_tasks([
+    "app.services.analytics", 
+    "app.services.fleet", 
+    "app.services.auto_dispatch"
+])

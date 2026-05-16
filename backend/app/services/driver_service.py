@@ -208,8 +208,12 @@ class DriverService:
         self,
         organization_id: UUID,
         limit: int = 50,
+        lat: Optional[float] = None,
+        lng: Optional[float] = None,
     ):
         return self.driver_repo.get_available_drivers(
             organization_id=organization_id,
             limit=limit,
+            lat=lat,
+            lng=lng
         )

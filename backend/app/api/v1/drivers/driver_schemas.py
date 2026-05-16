@@ -34,6 +34,8 @@ class DriverResponse(BaseModel):
     license_number: Optional[str]
     license_expiry: Optional[datetime]
     status: DriverStatus
+    active_workload: Optional[int] = 0
+    distance_meters: Optional[float] = None
     created_by: int
     updated_by: Optional[int]
     created_at: datetime

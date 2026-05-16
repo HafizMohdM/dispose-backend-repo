@@ -191,3 +191,8 @@ class RouteOptimizationService:
             db.commit()
             db.refresh(route)
         return route
+
+    @staticmethod
+    def get_active_routes(db: Session, org_id: int) -> List[OptimizedRoute]:
+        """Fetch active, dispatched, or in_progress routes for the organization"""
+        return RouteOptimizationRepository.get_active_routes(db, org_id)

@@ -50,9 +50,10 @@ async def websocket_dashboard(
     try:
         # 4. Push Initial Dashboard State (React-ready)
         # This gives the frontend the starting point for counters/charts
-        dashboard_data = await AnalyticsService.get_dashboard_summary(db, org_id)
+        dashboard_data = await AnalyticsService.get_executive_summary(db, org_id)
         await websocket.send_json({
             "event": "dashboard_init",
+            "type": "analytics_update",
             "organization_id": org_id,
             "data": dashboard_data
         })

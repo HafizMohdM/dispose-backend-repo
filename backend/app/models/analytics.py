@@ -8,12 +8,18 @@ class EventType(str, enum.Enum):
     LOGIN = "LOGIN"
     LOGOUT = "LOGOUT"
     PICKUP_CREATED = "PICKUP_CREATED"
+    PICKUP_STARTED = "PICKUP_STARTED"
     PICKUP_COMPLETED = "PICKUP_COMPLETED"
+    PICKUP_CANCELLED = "PICKUP_CANCELLED"
+    WASTE_WEIGHED = "WASTE_WEIGHED"
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     PAYMENT_FAILED = "PAYMENT_FAILED"
     SUB_UPGRADED = "SUB_UPGRADED"
     SUB_CANCELLED = "SUB_CANCELLED"
+    FLEET_HEARTBEAT = "FLEET_HEARTBEAT"
+    VEHICLE_MAINTENANCE = "VEHICLE_MAINTENANCE"
     SECURITY_ALERT = "SECURITY_ALERT"
+    ESG_GOAL_REACHED = "ESG_GOAL_REACHED"
 
 class AnalyticsEvent(Base, TimestampMixin):
     __tablename__ = "analytics_events"
@@ -50,10 +56,14 @@ class DailyMetric(Base):
     pending_pickups = Column(Integer, default=0)
     cancelled_pickups = Column(Integer, default=0)
     
+    total_waste_kg = Column(Float, default=0.0)
+    total_co2_saved_kg = Column(Float, default=0.0)
+    
     active_drivers = Column(Integer, default=0)
     total_revenue = Column(Numeric(12, 2), default=0.00)
     
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
     __table_args__ = (
         Index("ix_daily_metrics_org_date", "organization_id", "date"),

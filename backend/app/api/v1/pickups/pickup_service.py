@@ -33,6 +33,8 @@ from app.repositories.pickup_exception_repo import PickupExceptionRepository
 
 from app.repositories.pickup_activity_repo import PickupActivityRepository
 from app.models.pickup_activity import ActivityType
+from app.core.events import EventPublisher
+from app.models.analytics import EventType
 
 
 class PickupService:
@@ -450,7 +452,7 @@ class PickupService:
         db.commit()
         db.refresh(updated_pickup)
 
-        # Broadcast Realtime Event
+        # Broadcast Realtime Event via WebSockets (legacy)
         asyncio.create_task(pubsub_service.publish(
             f"analytics:org_{updated_pickup.organization_id}",
             {
@@ -462,6 +464,18 @@ class PickupService:
                     "actual_weight": updated_pickup.actual_weight,
                     "status": "completed"
                 }
+            }
+        ))
+
+        # --- INJECT EVENT PUBLISHER FOR ANALYTICS ---
+        asyncio.create_task(EventPublisher.publish(
+            db=db,
+            event_type=EventType.PICKUP_COMPLETED,
+            org_id=updated_pickup.organization_id,
+            user_id=user.id,
+            metadata={
+                "pickup_id": updated_pickup.id,
+                "weight_kg": request.actual_weight
             }
         ))
 

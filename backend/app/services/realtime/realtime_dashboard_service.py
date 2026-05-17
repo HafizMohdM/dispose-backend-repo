@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.services.analytics.analytics_service import AnalyticsService
 from app.core.pubsub import pubsub_service
+from app.websocket.manager import manager
 from datetime import datetime
 import asyncio
 import logging
@@ -14,19 +15,26 @@ class RealtimeDashboardService:
         Fetches latest KPI summary and broadcasts it to the dashboard.
         """
         try:
-            # 1. Fetch current analytics summary
-            dashboard_data = await AnalyticsService.get_dashboard_summary(db, org_id)
+            # 1. Fetch current analytics summary using the high-scale endpoint data
+            dashboard_data = await AnalyticsService.get_executive_summary(db, org_id)
             
-            # 2. Publish to Redis dashboard channel
+            payload = {
+                "event": "dashboard_kpi_update",
+                "type": "analytics_update",
+                "organization_id": org_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": dashboard_data
+            }
+            
+            # 2. Publish to Redis pubsub channel (for cross-worker communication)
             await pubsub_service.publish(
                 f"dashboard_org_{org_id}",
-                {
-                    "event": "dashboard_kpi_update",
-                    "organization_id": org_id,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "data": dashboard_data
-                }
+                payload
             )
+            
+            # 3. Broadcast directly to all connected WebSocket clients for this org
+            await manager.broadcast_to_org(org_id, payload)
+            
             logger.info(f"Broadcasted realtime KPI update for Org {org_id}")
         except Exception as e:
             logger.error(f"Failed to broadcast KPI update for Org {org_id}: {e}")

@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session
 from app.repositories.fleet_repo import FleetRepository
 from app.models.fleet import GPSHistory
 from app.core.pubsub import pubsub_service
+from app.core.events import EventPublisher
+from app.models.analytics import EventType
 from datetime import datetime
 import asyncio
 import logging
@@ -54,6 +56,19 @@ class FleetService:
             }
         ))
 
+        # --- INJECT EVENT PUBLISHER FOR ANALYTICS ---
+        asyncio.create_task(EventPublisher.publish(
+            db=db,
+            event_type=EventType.FLEET_HEARTBEAT,
+            org_id=org_id,
+            user_id=driver_id,
+            metadata={
+                "action": "location_update",
+                "latitude": data["latitude"],
+                "longitude": data["longitude"]
+            }
+        ))
+
     @staticmethod
     async def send_heartbeat(db: Session, driver_id: int, org_id: int):
         # Ensure session exists or start one
@@ -74,4 +89,13 @@ class FleetService:
                 "timestamp": datetime.utcnow().isoformat(),
                 "data": {"driver_id": driver_id}
             }
+        ))
+
+        # --- INJECT EVENT PUBLISHER FOR ANALYTICS ---
+        asyncio.create_task(EventPublisher.publish(
+            db=db,
+            event_type=EventType.FLEET_HEARTBEAT,
+            org_id=org_id,
+            user_id=driver_id,
+            metadata={"action": "heartbeat"}
         ))

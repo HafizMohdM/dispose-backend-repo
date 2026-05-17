@@ -14,11 +14,14 @@ redis_client: Optional[redis.Redis] = None
 async def init_redis():
     global redis_client
     try:
-        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        # Resolve 'localhost' specifically to 127.0.0.1 if needed, but standard REDIS_URL should work.
+        # Adding socket_connect_timeout to fail fast if Redis is down.
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=2)
         await redis_client.ping()
-        logger.info("Successfully connected to Redis")
+        logger.info(f"Successfully connected to Redis at {REDIS_URL}")
     except Exception as e:
-        logger.error(f"Failed to connect to Redis: {e}")
+        logger.error(f"CRITICAL: Failed to connect to Redis at {REDIS_URL}. Error: {e}")
+        # Ensure redis_client is set to None so the application can run in 'degraded' mode
         redis_client = None
 
 async def close_redis():

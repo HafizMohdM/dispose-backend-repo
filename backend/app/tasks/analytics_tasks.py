@@ -78,11 +78,49 @@ def aggregate_daily_metrics():
 @celery_app.task(name="app.tasks.analytics.calculate_sustainability_impact")
 def calculate_sustainability_impact():
     """
-    Nightly task to calculate ESG metrics from completed pickups.
+    Nightly task to calculate ESG metrics from completed pickups using pure DB aggregations.
     """
+    from app.models.pickup import Pickup, PickupStatus
+    from sqlalchemy.dialects.postgresql import insert
+    
     db = SessionLocal()
     try:
-        # Implementation similar to aggregate_daily_metrics but for sustainability
-        pass 
+        yesterday = date.today() - timedelta(days=1)
+        
+        # Pure DB Computation Enforcements
+        # Group by organization, calculate sum of waste_weight, and compute derived metrics natively
+        results = db.query(
+            Pickup.organization_id,
+            func.coalesce(func.sum(Pickup.waste_weight), 0.0).label("waste_diverted"),
+            (func.coalesce(func.sum(Pickup.waste_weight), 0.0) * 2.5).label("co2_saved"),
+            (func.coalesce(func.sum(Pickup.waste_weight), 0.0) * 1.2).label("energy_saved")
+        ).filter(
+            func.date(Pickup.updated_at) == yesterday,
+            Pickup.status == PickupStatus.COMPLETED
+        ).group_by(
+            Pickup.organization_id
+        ).all()
+        
+        for org_id, waste_diverted, co2_saved, energy_saved in results:
+            if not org_id: continue
+            
+            metric = db.query(SustainabilityMetric).filter(
+                and_(SustainabilityMetric.organization_id == org_id, SustainabilityMetric.date == yesterday)
+            ).first()
+            
+            if not metric:
+                metric = SustainabilityMetric(organization_id=org_id, date=yesterday)
+                db.add(metric)
+                
+            metric.waste_diverted_kg = float(waste_diverted)
+            metric.co2_saved_kg = float(co2_saved)
+            metric.energy_saved_kwh = float(energy_saved)
+            
+        db.commit()
+        logger.info(f"Successfully calculated sustainability impact for {len(results)} organizations.")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error calculating sustainability impact: {str(e)}")
     finally:
         db.close()

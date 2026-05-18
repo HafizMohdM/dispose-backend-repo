@@ -1,4 +1,5 @@
 from .base import Base
+from .invitation import Invitation, InvitationStatus
 from .user import User, UserSession
 from .role import Role, Permission
 from .role_mapping import UserRole, RolePermission

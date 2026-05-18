@@ -51,3 +51,44 @@ def update_setting(
     db.commit()
 
     return setting
+
+# --- FEATURE FLAGS API ---
+
+class FeatureFlagUpdate(SystemSettingUpdateRequest):
+    is_global: bool = False
+
+@router.put(
+    "/feature-flags/{flag_key}",
+    response_model=SystemSettingResponse,
+)
+def toggle_feature_flag(
+    flag_key: str,
+    payload: FeatureFlagUpdate,
+    db: Session = Depends(get_db),
+    org=Depends(get_current_organization),
+    _: bool = Depends(require_permission("admin.super")),
+):
+    from app.models.system_setting import SystemSetting
+    
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == flag_key,
+        SystemSetting.organization_id == (None if payload.is_global else org.id)
+    ).first()
+
+    if not setting:
+        setting = SystemSetting(
+            key=flag_key,
+            value=payload.value,
+            value_type="boolean",
+            is_global=payload.is_global,
+            organization_id=None if payload.is_global else org.id
+        )
+        db.add(setting)
+    else:
+        setting.value = payload.value
+        setting.is_global = payload.is_global
+        setting.organization_id = None if payload.is_global else org.id
+        
+    db.commit()
+    db.refresh(setting)
+    return setting

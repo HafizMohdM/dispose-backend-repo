@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, update
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.models.fleet import GPSHistory, DriverTrackingSession, LiveDriverLocation
 from typing import List, Optional
 
@@ -49,7 +49,6 @@ class FleetRepository:
     @staticmethod
     def get_active_fleet(db: Session, organization_id: int) -> List[LiveDriverLocation]:
         # Only return drivers updated in the last 5 minutes (online)
-        from datetime import timedelta
         threshold = datetime.utcnow() - timedelta(minutes=5)
         
         return db.query(LiveDriverLocation).filter(

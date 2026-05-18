@@ -60,7 +60,7 @@ class FleetService:
         asyncio.create_task(EventPublisher.publish(
             db=db,
             event_type=EventType.FLEET_HEARTBEAT,
-            org_id=org_id,
+            organization_id=org_id,
             user_id=driver_id,
             metadata={
                 "action": "location_update",
@@ -95,7 +95,7 @@ class FleetService:
         asyncio.create_task(EventPublisher.publish(
             db=db,
             event_type=EventType.FLEET_HEARTBEAT,
-            org_id=org_id,
+            organization_id=org_id,
             user_id=driver_id,
             metadata={"action": "heartbeat"}
         ))

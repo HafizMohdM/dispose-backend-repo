@@ -39,15 +39,12 @@ class DashboardService:
         )
 
     def get_sustainability_metrics(self, organization_id: int) -> SustainabilityMetricsResponse:
-        total_waste_weight = self.repo.get_total_waste_weight(organization_id)
-        # Calculate derived sustainability KPIs
-        co2_saved_kg = total_waste_weight * 2.5
-        clean_energy_kwh = total_waste_weight * 1.2
+        total_weight, co2_saved, clean_energy = self.repo.get_sustainability_kpis(organization_id)
         
         return SustainabilityMetricsResponse(
-            total_waste_weight_kg=total_waste_weight,
-            co2_saved_kg=co2_saved_kg,
-            clean_energy_kwh=clean_energy_kwh
+            total_waste_weight_kg=total_weight,
+            co2_saved_kg=co2_saved,
+            clean_energy_kwh=clean_energy
         )
 
     def get_performance_intelligence(self, organization_id: int) -> PerformanceIntelligenceResponse:
@@ -74,13 +71,11 @@ class DashboardService:
         )
 
     def get_co2_metrics(self, organization_id: int) -> CO2MetricsResponse:
-        total_waste_weight = self.repo.get_total_waste_weight(organization_id)
-        co2_saved_kg = total_waste_weight * 2.5
+        _, co2_saved_kg, _ = self.repo.get_sustainability_kpis(organization_id)
         return CO2MetricsResponse(co2_saved_kg=co2_saved_kg)
 
     def get_energy_recovery(self, organization_id: int) -> EnergyRecoveryResponse:
-        total_waste_weight = self.repo.get_total_waste_weight(organization_id)
-        clean_energy_kwh = total_waste_weight * 1.2
+        _, _, clean_energy_kwh = self.repo.get_sustainability_kpis(organization_id)
         return EnergyRecoveryResponse(clean_energy_kwh=clean_energy_kwh)
 
     def get_live_nodes(self, organization_id: int) -> LiveNodesResponse:
@@ -120,11 +115,10 @@ class DashboardService:
         if not goal:
             raise HTTPException(status_code=404, detail="Goal not found")
         
-        goal.current_value = request.current_value
-        if goal.current_value >= goal.target_value:
-            goal.is_completed = True
-            
-        goal = self.repo.update_eco_goal(goal)
+        self.repo.update_eco_goal_atomic(goal_id, organization_id, request.current_value)
+        
+        # Fetch updated goal state
+        goal = self.repo.get_eco_goal_by_id(goal_id, organization_id)
         
         progress = (goal.current_value / goal.target_value * 100) if goal.target_value > 0 else 0.0
         remaining = max(0.0, float(goal.target_value - goal.current_value))

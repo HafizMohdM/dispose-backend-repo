@@ -20,8 +20,8 @@ class UserRole(Base,TimestampMixin):
     __tablename__ = "user_roles"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
-    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=False, index=True)
+    org_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "role_id","org_id", name="uq_user_role"),

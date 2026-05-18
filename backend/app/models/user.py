@@ -8,7 +8,7 @@ class User(Base,TimestampMixin):
     id=Column(Integer,primary_key=True,index=True)
     mobile=Column(String(15),unique=True,nullable=False,index=True)
     email=Column(String(255),unique=True,nullable=True)
-    is_active=Column(Boolean,default=True,nullable=False)
+    is_active=Column(Boolean,default=True,nullable=False,index=True)
 
     # Auth hardening fields
     last_login_at = Column(DateTime, nullable=True)

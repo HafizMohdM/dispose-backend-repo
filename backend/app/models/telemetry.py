@@ -13,7 +13,7 @@ class VehicleTelemetry(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    vehicle_id = Column(UUID(as_uuid=True), ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
     
     speed_kmh = Column(Float, nullable=False, default=0.0)
     fuel_level_percentage = Column(Float, nullable=False, default=0.0)

@@ -32,7 +32,7 @@ class VehicleService:
         )
         return self.vehicle_repo.create(new_vehicle)
 
-    def get_vehicle(self, vehicle_id: UUID, organization_id: int) -> Vehicle:
+    def get_vehicle(self, vehicle_id: int, organization_id: int) -> Vehicle:
         vehicle = self.vehicle_repo.get_by_id(vehicle_id, organization_id)
         if not vehicle:
             raise HTTPException(
@@ -44,7 +44,7 @@ class VehicleService:
     def list_vehicles(self, organization_id: int, skip: int = 0, limit: int = 100) -> List[Vehicle]:
         return self.vehicle_repo.get_all(organization_id, skip, limit)
 
-    def update_vehicle(self, vehicle_id: UUID, organization_id: int, update_data: VehicleUpdate) -> Vehicle:
+    def update_vehicle(self, vehicle_id: int, organization_id: int, update_data: VehicleUpdate) -> Vehicle:
         vehicle = self.get_vehicle(vehicle_id, organization_id)
         
         update_dict = update_data.dict(exclude_unset=True)
@@ -53,7 +53,7 @@ class VehicleService:
             
         return self.vehicle_repo.update(vehicle)
 
-    def delete_vehicle(self, vehicle_id: UUID, organization_id: int):
+    def delete_vehicle(self, vehicle_id: int, organization_id: int):
         vehicle = self.get_vehicle(vehicle_id, organization_id)
         
         # A Vehicle cannot be deleted if it is currently assigned to an active driver or has an ACTIVE status
@@ -66,7 +66,7 @@ class VehicleService:
             
         self.vehicle_repo.soft_delete(vehicle)
 
-    def assign_driver(self, vehicle_id: UUID, driver_id: UUID, organization_id: int) -> VehicleAssignment:
+    def assign_driver(self, vehicle_id: int, driver_id: int, organization_id: int, actor_user_id: int, ip_address: str = None) -> VehicleAssignment:
         # Check if vehicle exists
         vehicle = self.get_vehicle(vehicle_id, organization_id)
         
@@ -133,6 +133,21 @@ class VehicleService:
                 
             self.db.commit()
             self.db.refresh(new_assignment)
+            
+            from app.services.audit_service import log_event
+            log_event(
+                self.db,
+                actor_user_id,
+                "ADMIN_VEHICLE_ASSIGNED",
+                org_id=organization_id,
+                metadata={
+                    "target_user_id": driver_id,
+                    "actor_user_id": actor_user_id,
+                    "org_id": organization_id,
+                    "vehicle_id": vehicle_id,
+                    "ip_address": ip_address
+                }
+            )
             return new_assignment
             
         except Exception as e:
@@ -142,7 +157,7 @@ class VehicleService:
                 detail=f"Failed to assign driver: {str(e)}"
             )
 
-    def unassign_driver(self, vehicle_id: UUID, organization_id: int):
+    def unassign_driver(self, vehicle_id: int, organization_id: int, actor_user_id: int, ip_address: str = None):
         vehicle = self.get_vehicle(vehicle_id, organization_id)
         
         active_assignment = self.vehicle_repo.get_active_assignment(vehicle_id)
@@ -167,6 +182,21 @@ class VehicleService:
                     driver_availability.status = DriverAvailabilityStatus.AVAILABLE
                     
             self.db.commit()
+            
+            from app.services.audit_service import log_event
+            log_event(
+                self.db,
+                actor_user_id,
+                "ADMIN_VEHICLE_UNASSIGNED",
+                org_id=organization_id,
+                metadata={
+                    "target_user_id": active_assignment.driver_id,
+                    "actor_user_id": actor_user_id,
+                    "org_id": organization_id,
+                    "vehicle_id": vehicle_id,
+                    "ip_address": ip_address
+                }
+            )
         except Exception as e:
             self.db.rollback()
             raise HTTPException(
@@ -174,7 +204,7 @@ class VehicleService:
                 detail=f"Failed to unassign driver: {str(e)}"
             )
 
-    def create_maintenance(self, vehicle_id: UUID, organization_id: int, request: VehicleMaintenanceCreate) -> VehicleMaintenance:
+    def create_maintenance(self, vehicle_id: int, organization_id: int, request: VehicleMaintenanceCreate) -> VehicleMaintenance:
         vehicle = self.get_vehicle(vehicle_id, organization_id)
         new_maintenance = VehicleMaintenance(
             vehicle_id=vehicle_id,

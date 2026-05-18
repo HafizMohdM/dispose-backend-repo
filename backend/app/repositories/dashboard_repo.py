@@ -23,10 +23,10 @@ class DashboardRepository:
         ).scalar() or 0
 
     def get_total_waste_weight(self, organization_id: int) -> float:
-        return self.db.query(func.sum(Pickup.waste_weight)).filter(
+        return self.db.query(func.coalesce(func.sum(Pickup.waste_weight), 0.0)).filter(
             Pickup.organization_id == organization_id,
             Pickup.status == PickupStatus.COMPLETED
-        ).scalar() or 0.0
+        ).scalar()
 
     def get_active_incidents_count(self, organization_id: int) -> int:
         return self.db.query(func.count(Incident.id)).filter(
@@ -74,11 +74,34 @@ class DashboardRepository:
             EcoGoal.organization_id == organization_id
         ).first()
 
-    def update_eco_goal(self, goal: EcoGoal) -> EcoGoal:
-        self.db.add(goal)
+    def update_eco_goal_atomic(self, goal_id: int, organization_id: int, new_value: float):
+        from sqlalchemy import case
+        self.db.query(EcoGoal).filter(
+            EcoGoal.id == goal_id,
+            EcoGoal.organization_id == organization_id
+        ).update({
+            EcoGoal.current_value: new_value,
+            EcoGoal.is_completed: case(
+                (new_value >= EcoGoal.target_value, True),
+                else_=EcoGoal.is_completed
+            )
+        }, synchronize_session=False)
         self.db.commit()
-        self.db.refresh(goal)
-        return goal
+
+    def get_sustainability_kpis(self, organization_id: int):
+        # Database-level math engines tracking ESG sustainability KPIs
+        # Hardcoded Logistic Math Constants: 2.5 for CO2, 1.2 for Energy
+        result = self.db.query(
+            func.coalesce(func.sum(Pickup.waste_weight), 0.0).label("total_weight"),
+            (func.coalesce(func.sum(Pickup.waste_weight), 0.0) * 2.5).label("co2_saved"),
+            (func.coalesce(func.sum(Pickup.waste_weight), 0.0) * 1.2).label("clean_energy")
+        ).filter(
+            Pickup.organization_id == organization_id,
+            Pickup.status == PickupStatus.COMPLETED
+        ).first()
+        if not result:
+            return 0.0, 0.0, 0.0
+        return float(result.total_weight), float(result.co2_saved), float(result.clean_energy)
 
     def get_live_pickup_nodes(self, organization_id: int):
         return self.db.query(Pickup.id, Pickup.latitude, Pickup.longitude).filter(

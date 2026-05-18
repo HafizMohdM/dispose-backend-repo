@@ -1,6 +1,6 @@
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -98,7 +98,7 @@ def list_maintenances(
     status_code=status.HTTP_201_CREATED,
 )
 def create_maintenance(
-    vehicle_id: UUID,
+    vehicle_id: int,
     request: VehicleMaintenanceCreate,
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
@@ -114,7 +114,7 @@ def create_maintenance(
     response_model=VehicleResponse,
 )
 def get_vehicle(
-    vehicle_id: UUID,
+    vehicle_id: int,
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -129,7 +129,7 @@ def get_vehicle(
     response_model=VehicleResponse,
 )
 def update_vehicle(
-    vehicle_id: UUID,
+    vehicle_id: int,
     request: VehicleUpdate,
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
@@ -145,7 +145,7 @@ def update_vehicle(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_vehicle(
-    vehicle_id: UUID,
+    vehicle_id: int,
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -162,29 +162,33 @@ def delete_vehicle(
     status_code=status.HTTP_200_OK,
 )
 def assign_driver(
-    vehicle_id: UUID,
-    request: AssignDriverRequest,
+    vehicle_id: int,
+    request_data: AssignDriverRequest,
+    request: Request,
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("vehicle.manage")),
 ):
     org_id = get_org_id(current_user, organization_id)
+    ip_address = request.client.host if request.client else None
     service = VehicleService(db)
-    return service.assign_driver(vehicle_id, request.driver_id, org_id)
+    return service.assign_driver(vehicle_id, request_data.driver_id, org_id, current_user.id, ip_address)
 
 @router.post(
     "/{vehicle_id}/unassign-driver",
     status_code=status.HTTP_200_OK,
 )
 def unassign_driver(
-    vehicle_id: UUID,
+    vehicle_id: int,
+    request: Request,
     organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("vehicle.manage")),
 ):
     org_id = get_org_id(current_user, organization_id)
+    ip_address = request.client.host if request.client else None
     service = VehicleService(db)
-    service.unassign_driver(vehicle_id, org_id)
+    service.unassign_driver(vehicle_id, org_id, current_user.id, ip_address)
     return {"status": "success", "message": "Driver unassigned successfully"}

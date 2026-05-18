@@ -2,6 +2,8 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Dat
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 import datetime
+import enum
+from sqlalchemy import Enum, Boolean
 
 class SustainabilityMetric(Base, TimestampMixin):
     """
@@ -53,8 +55,7 @@ class ESGGoal(Base, TimestampMixin):
 
     organization = relationship("Organization")
 
-import enum
-from sqlalchemy import Enum, Boolean
+
 
 class MetricType(str, enum.Enum):
     CO2_SAVED = "CO2_SAVED"

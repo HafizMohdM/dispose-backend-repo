@@ -1,5 +1,4 @@
 from sqlalchemy.orm import Session
-from uuid import UUID
 from typing import List, Optional
 from app.models.vehicle import Vehicle, VehicleAssignment, VehicleStatus
 
@@ -7,7 +6,7 @@ class VehicleRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_by_id(self, vehicle_id: UUID, organization_id: int) -> Optional[Vehicle]:
+    def get_by_id(self, vehicle_id: int, organization_id: int) -> Optional[Vehicle]:
         return self.db.query(Vehicle).filter(
             Vehicle.id == vehicle_id,
             Vehicle.organization_id == organization_id
@@ -42,16 +41,16 @@ class VehicleRepository:
         self.db.refresh(vehicle)
         return vehicle
 
-    def get_active_assignment(self, vehicle_id: UUID) -> Optional[VehicleAssignment]:
+    def get_active_assignment(self, vehicle_id: int) -> Optional[VehicleAssignment]:
         return self.db.query(VehicleAssignment).filter(
             VehicleAssignment.vehicle_id == vehicle_id,
-            VehicleAssignment.is_active == True
+            VehicleAssignment.status == "ACTIVE"
         ).first()
 
-    def get_active_assignment_by_driver(self, driver_id: UUID) -> Optional[VehicleAssignment]:
+    def get_active_assignment_by_driver(self, driver_id: int) -> Optional[VehicleAssignment]:
         return self.db.query(VehicleAssignment).filter(
             VehicleAssignment.driver_id == driver_id,
-            VehicleAssignment.is_active == True
+            VehicleAssignment.status == "ACTIVE"
         ).first()
 
     def create_assignment(self, assignment: VehicleAssignment) -> VehicleAssignment:

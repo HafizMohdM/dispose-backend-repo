@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router, TAGS_METADATA
 import traceback
+import logging
 
 from contextlib import asynccontextmanager
 from app.core.cache import init_redis, close_redis
@@ -42,11 +44,24 @@ app=FastAPI(
 from prometheus_fastapi_instrumentator import Instrumentator
 Instrumentator().instrument(app).expose(app)
 
+# Configure CORS for production
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Restrict to trusted domains in production via ENV
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(api_router,prefix="/api/v1")
 
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    traceback.print_exc()
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    logger = logging.getLogger("app")
+    logger.error(f"Unhandled Exception on {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500, 
+        content={"detail": "Internal server error. Please try again later."}
+    )

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, UsageEnforcer
 from app.core.permissions import require_permission
 
 from app.services.driver_service import DriverService
@@ -76,6 +76,7 @@ def create_driver(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: bool = Depends(require_permission("driver:create")),
+    __ = Depends(UsageEnforcer("drivers")),
 ):
 
     org_id = get_org_id(current_user, request.organization_id)
@@ -95,6 +96,9 @@ def create_driver(
         db.commit()
         return driver
 
+    except HTTPException as e:
+        db.rollback()
+        raise e
     except ValueError as e:
         db.rollback()
         raise HTTPException(

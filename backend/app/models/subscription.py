@@ -24,6 +24,7 @@ class Subscription(Base, TimestampMixin):
     status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.PENDING, nullable=False)
     auto_renew = Column(Boolean, default=True, nullable=False)
     cancelled_at = Column(DateTime, nullable=True)
+    grace_period_end = Column(DateTime, nullable=True)
     
     upgraded_from_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=True)
 

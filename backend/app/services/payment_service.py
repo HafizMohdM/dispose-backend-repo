@@ -304,8 +304,9 @@ class PaymentService:
             # Update Subscription if applicable
             if invoice.subscription_id:
                 sub = SubscriptionRepository.get_subscription_by_id(db, invoice.subscription_id)
-                if sub and sub.status in [SubscriptionStatus.PENDING, SubscriptionStatus.EXPIRED, SubscriptionStatus.GRACE]:
+                if sub and sub.status in [SubscriptionStatus.PENDING, SubscriptionStatus.EXPIRED, SubscriptionStatus.GRACE, SubscriptionStatus.SUSPENDED]:
                     sub.status = SubscriptionStatus.ACTIVE
+                    sub.grace_period_end = None # Reset grace period
                     
                     from app.models.subscription_plan import BillingCycle
                     now = datetime.utcnow()
@@ -318,8 +319,17 @@ class PaymentService:
                     sub.start_date = now
                     sub.end_date = end_date
                     
-                    usage = SubscriptionUsage(subscription_id=sub.id)
-                    SubscriptionRepository.create_usage_record(db, usage)
+                    # Create usage record only if not exists
+                    existing_usage = SubscriptionRepository.get_usage(db, sub.id)
+                    if not existing_usage:
+                        usage = SubscriptionUsage(subscription_id=sub.id)
+                        SubscriptionRepository.create_usage_record(db, usage)
+                    
+                    # If this is an upgrade/downgrade, transition the legacy subscription to EXPIRED
+                    if sub.upgraded_from_id:
+                        old_sub = SubscriptionRepository.get_subscription_by_id(db, sub.upgraded_from_id)
+                        if old_sub and old_sub.status == SubscriptionStatus.ACTIVE:
+                            old_sub.status = SubscriptionStatus.EXPIRED
 
             audit_svc.log_action(
                 user_id=invoice.organization_id,
@@ -449,11 +459,14 @@ class PaymentService:
         c.drawString(450, height - 235, "Amount (INR)")
         c.line(50, height - 245, 550, height - 245)
         
-        # Tax logic (assuming total amount includes 18% GST)
-        total_amount = float(invoice.amount)
-        base_amount = total_amount / 1.18
-        cgst = base_amount * 0.09
-        sgst = base_amount * 0.09
+        # Tax logic with optional discounts
+        base_amount = float(invoice.amount)
+        discount_amount = float(invoice.discount_amount)
+        taxable_amount = max(0.0, base_amount - discount_amount)
+        
+        cgst = round(taxable_amount * 0.09, 2)
+        sgst = round(taxable_amount * 0.09, 2)
+        final_amount = round(taxable_amount + cgst + sgst, 2)
         
         # Item Row
         c.setFont("Helvetica", 10)
@@ -461,10 +474,18 @@ class PaymentService:
         c.drawString(350, height - 265, "9994")
         c.drawString(450, height - 265, f"{base_amount:.2f}")
         
+        # If there is a discount, display it
+        y_offset = 265
+        if discount_amount > 0:
+            y_offset += 20
+            c.drawString(55, height - y_offset, "Prorated Credit Applied")
+            c.drawString(350, height - y_offset, "-")
+            c.drawString(450, height - y_offset, f"-{discount_amount:.2f}")
+        
         # Subtotals
         c.line(50, height - 320, 550, height - 320)
         c.drawString(350, height - 335, "Taxable Amount:")
-        c.drawString(450, height - 335, f"{base_amount:.2f}")
+        c.drawString(450, height - 335, f"{taxable_amount:.2f}")
         
         c.drawString(350, height - 350, "CGST (9%):")
         c.drawString(450, height - 350, f"{cgst:.2f}")
@@ -475,7 +496,7 @@ class PaymentService:
         c.line(350, height - 380, 550, height - 380)
         c.setFont("Helvetica-Bold", 12)
         c.drawString(350, height - 395, "Total Amount:")
-        c.drawString(450, height - 395, f"{total_amount:.2f}")
+        c.drawString(450, height - 395, f"{final_amount:.2f}")
         
         # Footer
         c.setFont("Helvetica", 8)
@@ -486,3 +507,86 @@ class PaymentService:
         
         buffer.seek(0)
         return buffer
+
+    @staticmethod
+    def get_payment_history(db: Session, organization_id: int, is_admin: bool) -> dict:
+        """
+        Returns transactional logs of payments filtered by organization, or all payments for administrators.
+        """
+        from app.models.payment import Payment
+        from app.models.invoice import Invoice
+        from app.models.organization import Organization
+        
+        query = db.query(Payment).join(Invoice).join(Organization)
+        
+        if not is_admin:
+            query = query.filter(Invoice.organization_id == organization_id)
+            
+        payments = query.order_by(Payment.created_at.desc()).all()
+        
+        points = []
+        for p in payments:
+            points.append({
+                "payment_id": str(p.id),
+                "invoice_id": str(p.invoice_id),
+                "amount": float(p.amount),
+                "status": p.status.value,
+                "gateway": p.gateway.value,
+                "gateway_payment_id": p.gateway_payment_id,
+                "invoice_status": p.invoice.status.value,
+                "organization_name": p.invoice.organization.name,
+                "created_at": p.created_at
+            })
+            
+        return {"payments": points}
+
+    @staticmethod
+    def refund_payment(db: Session, payment_id: str) -> dict:
+        """
+        Processes a mock/gateway refund for a successful payment, updating database transaction states.
+        """
+        import uuid
+        from app.models.payment import Payment, PaymentStatus
+        from app.models.invoice import Invoice, InvoiceStatus
+        from app.services.audit_service import AuditService
+        
+        try:
+            payment_uuid = uuid.UUID(payment_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid payment ID format")
+            
+        payment = db.query(Payment).filter(Payment.id == payment_uuid).first()
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment transaction not found")
+            
+        if payment.status != PaymentStatus.SUCCESS:
+            raise HTTPException(status_code=400, detail="Only successful payments can be refunded")
+            
+        payment.status = PaymentStatus.REFUNDED
+        payment.invoice.status = InvoiceStatus.REFUNDED
+        
+        audit_svc = AuditService(db)
+        audit_svc.log_action(
+            user_id=payment.invoice.organization_id,
+            action="payment.refunded",
+            org_id=payment.invoice.organization_id,
+            meta={"payment_id": payment_id, "amount": float(payment.amount)}
+        )
+        
+        # Transition matching subscription to PENDING if active
+        if payment.invoice.subscription:
+            sub = payment.invoice.subscription
+            if sub.status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE]:
+                sub.status = SubscriptionStatus.PENDING
+                
+        db.commit()
+        db.refresh(payment)
+        
+        return {
+            "payment_id": str(payment.id),
+            "invoice_id": str(payment.invoice_id),
+            "amount": float(payment.amount),
+            "status": "REFUNDED",
+            "message": "Payment refunded successfully."
+        }
+

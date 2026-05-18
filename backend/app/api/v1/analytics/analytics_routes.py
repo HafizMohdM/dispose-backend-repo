@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, get_user_org
+from app.core.dependencies import get_current_user, get_user_org, UsageEnforcer
 from app.core.permissions import require_permission
 from app.services.analytics.analytics_service import AnalyticsService
 from app.services.analytics.sustainability_service import SustainabilityService
@@ -43,7 +43,8 @@ async def get_live_kpis(
 @router.get("/sustainability", response_model=SustainabilityReportResponse)
 async def get_sustainability_report(
     db: Session = Depends(get_db),
-    current_user = Depends(require_permission("analytics.view"))
+    current_user = Depends(require_permission("analytics.view")),
+    _quota = Depends(UsageEnforcer("pickups", soft_limit=True))
 ):
     """ESG (Environmental, Social, and Governance) impact metrics and goal tracking."""
     org = get_user_org(db, current_user)

@@ -47,3 +47,105 @@ class PickupExceptionRepository:
         exception.resolved_by_id = resolved_by_id
         db.flush()
         return exception
+
+    @staticmethod
+    def get_filtered_exceptions(
+        db: Session,
+        organization_id: Optional[int] = None,
+        resolved: Optional[bool] = None,
+        exception_type: Optional[ExceptionType] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> List[PickupException]:
+        query = db.query(PickupException).join(Pickup, Pickup.id == PickupException.pickup_id)
+        
+        if organization_id is not None:
+            query = query.filter(Pickup.organization_id == organization_id)
+            
+        if resolved is not None:
+            query = query.filter(PickupException.resolved == resolved)
+            
+        if exception_type is not None:
+            query = query.filter(PickupException.exception_type == exception_type)
+            
+        if start_date is not None:
+            query = query.filter(PickupException.created_at >= start_date)
+            
+        if end_date is not None:
+            query = query.filter(PickupException.created_at <= end_date)
+            
+        return query.order_by(PickupException.created_at.desc()).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def count_filtered_exceptions(
+        db: Session,
+        organization_id: Optional[int] = None,
+        resolved: Optional[bool] = None,
+        exception_type: Optional[ExceptionType] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> int:
+        from sqlalchemy import func
+        query = db.query(func.count(PickupException.id)).join(Pickup, Pickup.id == PickupException.pickup_id)
+        
+        if organization_id is not None:
+            query = query.filter(Pickup.organization_id == organization_id)
+            
+        if resolved is not None:
+            query = query.filter(PickupException.resolved == resolved)
+            
+        if exception_type is not None:
+            query = query.filter(PickupException.exception_type == exception_type)
+            
+        if start_date is not None:
+            query = query.filter(PickupException.created_at >= start_date)
+            
+        if end_date is not None:
+            query = query.filter(PickupException.created_at <= end_date)
+            
+        return query.scalar() or 0
+
+    @staticmethod
+    def get_exceptions_stats(
+        db: Session,
+        organization_id: Optional[int] = None,
+    ) -> dict:
+        from sqlalchemy import func
+        
+        # Base query joined to Pickup to enforce organization context
+        base_query = db.query(PickupException).join(Pickup, Pickup.id == PickupException.pickup_id)
+        if organization_id is not None:
+            base_query = base_query.filter(Pickup.organization_id == organization_id)
+            
+        total = base_query.count()
+        resolved = base_query.filter(PickupException.resolved == True).count()
+        unresolved = total - resolved
+        
+        resolution_rate = 0.0
+        if total > 0:
+            resolution_rate = round((resolved / total) * 100, 2)
+            
+        # Breakdown by ExceptionType
+        breakdown_query = (
+            db.query(PickupException.exception_type, func.count(PickupException.id))
+            .join(Pickup, Pickup.id == PickupException.pickup_id)
+        )
+        if organization_id is not None:
+            breakdown_query = breakdown_query.filter(Pickup.organization_id == organization_id)
+            
+        breakdown_results = breakdown_query.group_by(PickupException.exception_type).all()
+        
+        type_breakdown = {
+            t.value if hasattr(t, "value") else str(t): count 
+            for t, count in breakdown_results
+        }
+        
+        return {
+            "total_exceptions": total,
+            "resolved_count": resolved,
+            "unresolved_count": unresolved,
+            "resolution_rate": resolution_rate,
+            "type_breakdown": type_breakdown
+        }

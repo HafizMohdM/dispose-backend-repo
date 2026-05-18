@@ -1,10 +1,10 @@
 import uuid
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
 from app.models.base import Base
-from app.utils.enums import NotificationType, NotificationStatus
+from app.utils.enums import NotificationType, NotificationStatus, NotificationSeverity, NotificationCategory, DeliveryChannel, DeliveryStatus
 
 
 class Notification(Base):
@@ -77,9 +77,36 @@ class Notification(Base):
         nullable=True,
     )
 
+    severity = Column(
+        Enum(NotificationSeverity),
+        nullable=False,
+        default=NotificationSeverity.INFO,
+        index=True,
+    )
 
-class NotificationLog(Base):
-    __tablename__ = "notification_logs"
+    category = Column(
+        Enum(NotificationCategory),
+        nullable=False,
+        default=NotificationCategory.SYSTEM,
+        index=True,
+    )
+
+    source_service = Column(
+        String(50),
+        nullable=True,
+        index=True,
+    )
+
+    archived = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        index=True,
+    )
+
+
+class NotificationDeliveryLog(Base):
+    __tablename__ = "notification_delivery_logs"
 
     id = Column(
         UUID(as_uuid=True),
@@ -94,18 +121,42 @@ class NotificationLog(Base):
         index=True,
     )
 
-    delivery_status = Column(
-        String(50),
+    channel = Column(
+        Enum(DeliveryChannel),
         nullable=False,
+        index=True,
     )
 
-    delivery_channel = Column(
-        String(50),
+    delivery_status = Column(
+        Enum(DeliveryStatus),
         nullable=False,
+        default=DeliveryStatus.PENDING,
+        index=True,
     )
 
     error_message = Column(
         Text,
+        nullable=True,
+    )
+
+    provider = Column(
+        String(50),
+        nullable=True,
+    )
+
+    retry_count = Column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    sent_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    delivered_at = Column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
@@ -114,4 +165,59 @@ class NotificationLog(Base):
         server_default=func.now(),
         nullable=False,
     )
+
+
+class UserNotificationPreference(Base):
+    __tablename__ = "user_notification_preferences"
+
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    organization_id = Column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    category = Column(
+        Enum(NotificationCategory),
+        nullable=False,
+        index=True,
+    )
+
+    in_app_enabled = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    email_enabled = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    push_enabled = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    # Composite unique constraint to prevent duplicate preferences per category
+    __table_args__ = (
+        UniqueConstraint("user_id", "category", name="uq_user_category_preference"),
+    )
+
 

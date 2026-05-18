@@ -4,7 +4,7 @@ from typing import List
 
 from app.core.database import get_db
 from app.core.permissions import require_permission
-from app.core.dependencies import get_user_org
+from app.core.dependencies import get_user_org, UsageEnforcer
 from app.models.user import User
 
 from app.api.v1.pickups.recurring_schemas import RecurringPickupCreateRequest, RecurringPickupResponse
@@ -17,7 +17,8 @@ router = APIRouter()
 async def create_recurring_pickup(
     request: RecurringPickupCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("pickup.manage"))
+    current_user: User = Depends(require_permission("pickup.manage")),
+    _quota = Depends(UsageEnforcer("pickups"))
 ):
     """Create a new recurring pickup rule"""
     org = get_user_org(db, current_user)

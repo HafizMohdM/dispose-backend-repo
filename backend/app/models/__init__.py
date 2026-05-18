@@ -29,3 +29,4 @@ from .system_setting import SystemSetting
 from .trip import Trip, TripStop
 from .driver_operations import DriverShift, DriverDocument
 from .incident import Incident
+from .notification import Notification, UserNotificationPreference, NotificationDeliveryLog

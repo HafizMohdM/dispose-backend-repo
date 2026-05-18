@@ -22,7 +22,28 @@ class NotificationType(str,Enum):
     PICKUP_COMPLETED="PICKUP_COMPLETED"
     SYSTEM = "SYSTEM"
 
+class NotificationSeverity(str, Enum):
+    CRITICAL = "CRITICAL"
+    WARNING = "WARNING"
+    SUCCESS = "SUCCESS"
+    INFO = "INFO"
 
+class NotificationCategory(str, Enum):
+    ALERT = "ALERT"
+    OPERATIONAL = "OPERATIONAL"
+    INSIGHT = "INSIGHT"
+    SYSTEM = "SYSTEM"
 
+class DeliveryChannel(str, Enum):
+    IN_APP = "IN_APP"
+    EMAIL = "EMAIL"
+    PUSH = "PUSH"
+
+class DeliveryStatus(str, Enum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
 
     

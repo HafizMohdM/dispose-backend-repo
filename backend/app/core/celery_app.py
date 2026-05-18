@@ -38,11 +38,16 @@ celery_app.conf.beat_schedule = {
         "task": "app.services.fleet.tasks.cleanup_stale_fleet_sessions",
         "schedule": crontab(minute="*/15"), # Every 15 minutes
     },
+    "process-dunning-daily": {
+        "task": "app.tasks.subscription_tasks.process_dunning_and_suspensions",
+        "schedule": crontab(hour=0, minute=0), # Daily at midnight
+    },
 }
 
 
 celery_app.autodiscover_tasks([
     "app.services.analytics", 
     "app.services.fleet", 
-    "app.services.auto_dispatch"
+    "app.services.auto_dispatch",
+    "app.tasks"
 ])

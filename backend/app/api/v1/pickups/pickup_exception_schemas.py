@@ -24,3 +24,11 @@ class PickupExceptionResponse(BaseModel):
 class PickupExceptionListResponse(BaseModel):
     exceptions: List[PickupExceptionResponse]
     total: int
+
+
+class PickupExceptionStatsResponse(BaseModel):
+    total_exceptions: int
+    resolved_count: int
+    unresolved_count: int
+    resolution_rate: float
+    type_breakdown: dict

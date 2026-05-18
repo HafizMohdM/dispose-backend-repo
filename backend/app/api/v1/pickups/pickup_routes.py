@@ -39,7 +39,7 @@ from app.api.v1.pickups.pickup_exception_schemas import (
 )
 from app.repositories.pickup_exception_repo import PickupExceptionRepository
 
-from app.core.dependencies import get_db, get_user_org
+from app.core.dependencies import get_db, get_user_org, UsageEnforcer
 from app.core.permissions import require_permission
 
 from app.api.v1.pickups.pickup_activity_schemas import PickupActivityCreateRequest, PickupTimelineResponse, PickupActivityResponse
@@ -52,7 +52,8 @@ router = APIRouter()
 def create_pickup(
     request: PickupCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("pickup.create"))
+    current_user: User = Depends(require_permission("pickup.create")),
+    _quota = Depends(UsageEnforcer("pickups"))
 ):
     """
     Creates a new pickup for the user's organization.

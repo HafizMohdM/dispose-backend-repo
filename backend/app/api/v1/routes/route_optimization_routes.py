@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.permissions import require_permission
-from app.core.dependencies import get_user_org
+from app.core.dependencies import get_user_org, UsageEnforcer
 from app.models.user import User
 
 from app.api.v1.routes.route_schemas import (
@@ -21,7 +21,8 @@ router = APIRouter()
 async def optimize_route(
     request: RouteOptimizeRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.manage"))
+    current_user: User = Depends(require_permission("fleet.manage")),
+    _quota = Depends(UsageEnforcer("pickups", soft_limit=True))
 ):
     """Create an optimized route using TSP (OR-Tools)"""
     org = get_user_org(db, current_user)

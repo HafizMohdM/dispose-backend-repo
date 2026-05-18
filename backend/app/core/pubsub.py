@@ -31,7 +31,7 @@ class PubSubManager:
         while self.is_listening:
             try:
                 # Re-subscribe on each retry if needed
-                await self.pubsub.psubscribe("analytics:*", "dashboard:*")
+                await self.pubsub.psubscribe("analytics:*", "dashboard:*", "notifications:*")
                 
                 async for message in self.pubsub.listen():
                     if not self.is_listening:
@@ -42,10 +42,15 @@ class PubSubManager:
                         data = json.loads(message["data"])
                         
                         org_id = data.get("organization_id")
+                        user_id = data.get("user_id")
                         
-                        if org_id:
+                        if user_id:
+                            # User-specific real-time delivery
+                            await manager.send_to_user(user_id, data)
+                        elif org_id:
+                            # Organization-wide broadcast
                             await manager.broadcast_to_org(org_id, data)
-                        elif channel in ["analytics:global", "dashboard:global"]:
+                        elif channel in ["analytics:global", "dashboard:global", "notifications:global"]:
                             await manager.broadcast_global(data)
                             
             except (redis.ConnectionError, redis.TimeoutError) as e:
@@ -59,8 +64,7 @@ class PubSubManager:
         """Safely stop the listener without crashing during shutdown"""
         self.is_listening = False
         try:
-            # We use a timeout to avoid hanging if Redis is dead
-            await asyncio.wait_for(self.pubsub.punsubscribe("analytics:*", "dashboard:*"), timeout=2.0)
+            await asyncio.wait_for(self.pubsub.punsubscribe("analytics:*", "dashboard:*", "notifications:*"), timeout=2.0)
         except Exception as e:
             logger.warning(f"Could not unsubscribe from Redis during shutdown: {e}")
         logger.info("Stopped Redis Pub/Sub Listener")

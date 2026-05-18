@@ -49,7 +49,7 @@ class SubscriptionRepository:
     def get_active_subscription(db: Session, organization_id: int) -> Subscription:
         return db.query(Subscription).filter(
             Subscription.organization_id == organization_id,
-            Subscription.status == SubscriptionStatus.ACTIVE
+            Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.GRACE])
         ).first()
 
     @staticmethod

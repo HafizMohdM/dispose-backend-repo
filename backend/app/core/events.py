@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.cache import redis_client
 from app.models.analytics import AnalyticsEvent, EventType
 from app.websocket.manager import manager
+from app.utils.enums import NotificationSeverity, NotificationCategory
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,120 @@ class EventPublisher:
                     "timestamp": datetime.utcnow().isoformat(),
                     "data": metadata
                 })
+
+            # 4. Integrate Real-time Notifications for Core SaaS Events
+            notification_map = {
+                EventType.PICKUP_CREATED: {
+                    "title": "New Pickup Scheduled",
+                    "message": "A new waste pickup request has been scheduled successfully.",
+                    "category": NotificationCategory.OPERATIONAL,
+                    "severity": NotificationSeverity.INFO,
+                },
+                EventType.PICKUP_COMPLETED: {
+                    "title": "Pickup Completed Successfully",
+                    "message": "Your scheduled waste pickup request has been successfully completed.",
+                    "category": NotificationCategory.OPERATIONAL,
+                    "severity": NotificationSeverity.SUCCESS,
+                },
+                EventType.PAYMENT_SUCCESS: {
+                    "title": "Invoice Payment Captured",
+                    "message": f"Payment of INR {metadata.get('amount', '0.0') if metadata else '0.0'} captured successfully.",
+                    "category": NotificationCategory.ALERT,
+                    "severity": NotificationSeverity.SUCCESS,
+                },
+                EventType.PAYMENT_FAILED: {
+                    "title": "Invoice Payment Authorization Failed",
+                    "message": "A payment renewal attempt failed. Please check your payment methods immediately.",
+                    "category": NotificationCategory.ALERT,
+                    "severity": NotificationSeverity.CRITICAL,
+                },
+                EventType.SUB_UPGRADED: {
+                    "title": "Subscription Plan Upgraded",
+                    "message": "Your organization subscription has been successfully upgraded to the new plan.",
+                    "category": NotificationCategory.ALERT,
+                    "severity": NotificationSeverity.SUCCESS,
+                }
+            }
+
+            if event_type in notification_map and organization_id and user_id:
+                notif_data = notification_map[event_type]
+                
+                # Check for dynamic override in metadata if provided
+                title = metadata.get("title", notif_data["title"]) if metadata else notif_data["title"]
+                message = metadata.get("message", notif_data["message"]) if metadata else notif_data["message"]
+                
+                parsed_entity_id = None
+                if entity_id:
+                    try:
+                        from uuid import UUID
+                        parsed_entity_id = UUID(str(entity_id))
+                    except Exception:
+                        pass
+                
+                from app.models.notification import Notification
+                from app.utils.enums import NotificationStatus
+                
+                new_notif = Notification(
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    title=title,
+                    message=message,
+                    type="SYSTEM",
+                    status=NotificationStatus.UNREAD,
+                    severity=notif_data["severity"],
+                    category=notif_data["category"],
+                    source_service="EVENT_DISPATCHER",
+                    archived=False,
+                    entity_type=entity_type,
+                    entity_id=parsed_entity_id
+                )
+                db.add(new_notif)
+                db.flush()
+                
+                # Publish the created notification via Redis PubSub for real-time WebSocket delivery
+                from app.core.pubsub import pubsub_service
+                
+                # Query updated unread count
+                from app.services.notification_service import NotificationService
+                service = NotificationService(db)
+                unread_count = service.get_unread_count(organization_id, user_id)
+                
+                await pubsub_service.publish(f"notifications:user_{user_id}", {
+                    "event": "notification_new",
+                    "organization_id": organization_id,
+                    "user_id": user_id,
+                    "data": {
+                        "notification": {
+                            "id": str(new_notif.id),
+                            "organization_id": new_notif.organization_id,
+                            "user_id": new_notif.user_id,
+                            "title": new_notif.title,
+                            "message": new_notif.message,
+                            "type": "SYSTEM",
+                            "status": "UNREAD",
+                            "severity": new_notif.severity.value,
+                            "category": new_notif.category.value,
+                            "source_service": new_notif.source_service,
+                            "archived": False,
+                            "entity_type": new_notif.entity_type,
+                            "entity_id": str(new_notif.entity_id) if new_notif.entity_id else None,
+                            "created_at": new_notif.created_at.isoformat() if hasattr(new_notif.created_at, "isoformat") else str(new_notif.created_at),
+                            "read_at": None,
+                        },
+                        "unread_count": unread_count
+                    }
+                })
+                
+                # Trigger multi-channel delivery (Email + Push) via Celery
+                try:
+                    from app.tasks.notification_tasks import dispatch_multi_channel
+                    dispatch_multi_channel.delay(
+                        str(new_notif.id),
+                        user_id,
+                        organization_id,
+                    )
+                except Exception as dispatch_err:
+                    logger.warning(f"Multi-channel dispatch queuing failed (non-blocking): {dispatch_err}")
 
         except Exception as e:
             logger.error(f"Failed to publish event {event_type}: {str(e)}")

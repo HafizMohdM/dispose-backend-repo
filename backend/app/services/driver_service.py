@@ -17,18 +17,44 @@ class DriverService:
 
     def create_driver(
         self,
-        organization_id: UUID,
+        organization_id: int,
         name: str,
         mobile: str,
         email: Optional[str],
         license_number: Optional[str],
         license_expiry,
-        created_by: UUID,
+        created_by: int,
     ) -> Driver:
         
-        "prevent duplicate mobile inside same organization "
+        # 1. Fetch ACTIVE subscription for organization
+        from app.repositories.subscription_repo import SubscriptionRepository
+        from app.models.subscription import SubscriptionStatus
+        from fastapi import HTTPException
+        from datetime import datetime
+        
+        sub = SubscriptionRepository.get_active_subscription(self.db, organization_id)
+        if not sub:
+            raise HTTPException(status_code=403, detail="No active subscription found. Please subscribe to a plan.")
+            
+        # 2. Validate not expired
+        if datetime.utcnow() > sub.end_date:
+            SubscriptionRepository.update_subscription_status(self.db, sub.id, SubscriptionStatus.EXPIRED)
+            self.db.commit()
+            raise HTTPException(status_code=403, detail="Subscription has expired.")
+            
+        # 3. Lock subscription_usage row and safely increment usage using the atomic validator
+        from app.services.subscription_service import SubscriptionService
+        SubscriptionService.validate_and_increment_usage(
+            db=self.db,
+            subscription_id=sub.id,
+            pickups=0,
+            weight=0.0,
+            drivers=1
+        )
+        
+        # 4. Prevent duplicate mobile inside same organization
         existing = self.driver_repo.get_driver_by_mobile(
-            mobile =mobile,
+            mobile=mobile,
             organization_id=organization_id,
         )
         if existing:

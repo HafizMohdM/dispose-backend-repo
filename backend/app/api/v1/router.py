@@ -30,6 +30,9 @@ from app.websocket.analytics_ws import router as analytics_ws_router
 from app.websocket.dashboard_ws import router as dashboard_ws_router
 from app.api.v1.drivers.mobile_routes import router as mobile_router
 from app.api.v1.payments.payment_routes import router as payment_router
+from app.api.v1.trips.trip_routes import router as trip_router
+from app.api.v1.incidents.incident_routes import router as incident_router
+from app.api.v1.dashboard.dashboard_routes import router as dashboard_router
 
 # Production-level Tag Metadata for OpenAPI Documentation
 TAGS_METADATA = [
@@ -119,6 +122,11 @@ api_router.include_router(
     prefix="/routes",
     tags=["Logistics & Routing"]
 )
+api_router.include_router(
+    trip_router,
+    prefix="/trips",
+    tags=["Logistics & Routing"]
+)
 
 # =============================================================================
 # FLEET INTELLIGENCE
@@ -153,6 +161,11 @@ api_router.include_router(
     prefix="/telemetry",
     tags=["Fleet Intelligence"]
 )
+api_router.include_router(
+    incident_router,
+    prefix="/incidents",
+    tags=["Fleet Intelligence"]
+)
 
 # =============================================================================
 # FINANCIALS
@@ -179,6 +192,11 @@ api_router.include_router(
 api_router.include_router(
     driver_analytics_router,
     prefix="/analytics/drivers",
+    tags=["Analytics & Insights"]
+)
+api_router.include_router(
+    dashboard_router,
+    prefix="/dashboard",
     tags=["Analytics & Insights"]
 )
 

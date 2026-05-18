@@ -3,12 +3,14 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.models.base import Base, TimestampMixin
 
+from sqlalchemy.dialects.postgresql import UUID
+
 class OptimizedRoute(Base, TimestampMixin):
     __tablename__ = "optimized_routes"
 
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True)
+    vehicle_id = Column(UUID(as_uuid=True), ForeignKey("vehicles.id"), nullable=True)
     driver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     status = Column(String, default="draft") # draft, assigned, active, completed, cancelled

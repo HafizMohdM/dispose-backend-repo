@@ -18,6 +18,10 @@ from app.api.v1.drivers.driver_schemas import (
     DriverResponse,
     DriverAvailabilityUpdateRequest,
     DriverLocationUpdateRequest,
+    DriverShiftResponse,
+    DriverDocumentCreate,
+    DriverDocumentResponse,
+    DocumentVerifyRequest,
 )
 
 
@@ -367,3 +371,162 @@ def deactivate_driver(
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=404, detail=str(e))
+
+# --- Phase 2: GPS Polling Backups ---
+
+@router.post(
+    "/{driver_id}/heartbeat",
+    status_code=status.HTTP_200_OK,
+)
+def driver_heartbeat(
+    driver_id: UUID,
+    request: DriverLocationUpdateRequest,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:update")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    return service.process_heartbeat(driver_id, org_id, request.latitude, request.longitude)
+
+@router.get(
+    "/live-map",
+    status_code=status.HTTP_200_OK,
+)
+def get_live_map(
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:view")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    return service.get_live_map(org_id)
+
+@router.get(
+    "/live-status",
+    status_code=status.HTTP_200_OK,
+)
+def get_live_status(
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:view")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    return service.get_live_status(org_id)
+
+# --- Phase 4: Shift Management ---
+
+@router.get(
+    "/shifts",
+    response_model=List[DriverShiftResponse],
+)
+def list_shifts(
+    skip: int = 0,
+    limit: int = 50,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:view")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    return service.get_shifts(org_id, skip, limit)
+
+@router.post(
+    "/{driver_id}/clock-in",
+    response_model=DriverShiftResponse,
+)
+def clock_in(
+    driver_id: UUID,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:update")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    try:
+        return service.clock_in(driver_id, org_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+@router.post(
+    "/{driver_id}/clock-out",
+    response_model=DriverShiftResponse,
+)
+def clock_out(
+    driver_id: UUID,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:update")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    try:
+        return service.clock_out(driver_id, org_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+# --- Phase 4: Driver Compliance ---
+
+@router.post(
+    "/{driver_id}/documents",
+    response_model=DriverDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_document(
+    driver_id: UUID,
+    request: DriverDocumentCreate,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:update")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    # Basic extension validation
+    ext = request.file_url.lower().split('.')[-1]
+    if ext not in ["pdf", "jpeg", "jpg", "png"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF, JPEG, and PNG extensions are allowed for compliance documents.")
+    # Assuming the 10MB limit is enforced at the upload level (e.g. via S3 presigned URL limits or middleware)
+    
+    service = DriverService(db)
+    return service.upload_document(driver_id, org_id, request.document_type, request.file_url)
+
+@router.get(
+    "/{driver_id}/documents",
+    response_model=List[DriverDocumentResponse],
+)
+def get_documents(
+    driver_id: UUID,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:view")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    return service.get_documents(driver_id, org_id)
+
+@router.patch(
+    "/{id}/verify",
+    response_model=DriverDocumentResponse,
+)
+def verify_document(
+    id: UUID,
+    request: DocumentVerifyRequest,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("driver:manage")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = DriverService(db)
+    try:
+        return service.verify_document(id, org_id, request.status, request.rejection_reason, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

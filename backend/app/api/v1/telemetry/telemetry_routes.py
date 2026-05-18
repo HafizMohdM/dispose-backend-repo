@@ -1,61 +1,73 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.core.permissions import require_permission
-from app.models.user import User
-from app.api.v1.telemetry.telemetry_schemas import TelemetryIngestRequest, DiagnosticResponse
+
 from app.services.telemetry_service import TelemetryService
-from app.repositories.telemetry_repo import TelemetryRepository
-from app.repositories.vehicle_repo import VehicleRepository
-from app.core.dependencies import get_user_org
+from app.api.v1.telemetry.telemetry_schemas import (
+    TelemetryIngestRequest,
+    TelemetryResponse
+)
 
 router = APIRouter()
 
-@router.post("/ingest")
+def get_org_id(current_user, request_org_id: Optional[int] = None) -> int:
+    org_id = request_org_id or getattr(current_user, "current_org_id", None)
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="organization_id is required."
+        )
+    return org_id
+
+@router.post(
+    "/{vehicle_id}",
+    response_model=TelemetryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def ingest_telemetry(
+    vehicle_id: UUID,
     request: TelemetryIngestRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    High-throughput endpoint for IoT devices to stream sensor data.
-    """
-    # 1. Validate Device
-    device = TelemetryRepository.get_device_by_identifier(db, request.device_identifier)
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not recognized")
-    
-    if not device.vehicle_id:
-        raise HTTPException(status_code=400, detail="Device not assigned to a vehicle")
-
-    # 2. Get Vehicle & Org for scoped broadcasting
-    vehicle = VehicleRepository.get_vehicle_by_id(db, device.vehicle_id)
-    
-    await TelemetryService.ingest_data(
-        db=db,
-        device_id=device.id,
-        vehicle_id=vehicle.id,
-        org_id=vehicle.organization_id,
-        data=request.dict()
-    )
-    
-    return {"status": "success"}
-
-@router.get("/{vehicle_id}/live", response_model=DiagnosticResponse)
-async def get_live_diagnostics(
-    vehicle_id: int,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.view"))
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
 ):
     """
-    Returns the most recent diagnostic snapshot for a vehicle.
+    Ingest telemetry data for a vehicle. Requires vehicle.manage or valid device token.
+    (Device token validation is delegated to a separate dependency or middleware if applicable)
     """
-    org = get_user_org(db, current_user)
-    vehicle = VehicleRepository.get_vehicle_by_id(db, vehicle_id)
-    if not vehicle or vehicle.organization_id != org.id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this vehicle's telemetry")
-
-    diag = TelemetryRepository.get_latest_diagnostics(db, vehicle_id)
-    if not diag:
-        raise HTTPException(status_code=404, detail="No telemetry data found for this vehicle")
+    org_id = get_org_id(current_user, organization_id)
+    service = TelemetryService(db)
     
-    return diag
+    return await service.ingest_telemetry(
+        vehicle_id=vehicle_id,
+        organization_id=org_id,
+        payload=request
+    )
+
+@router.get(
+    "/{vehicle_id}/latest",
+    response_model=TelemetryResponse,
+)
+def get_latest_telemetry(
+    vehicle_id: UUID,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.view")),
+):
+    """
+    Retrieve the latest telemetry for a given vehicle.
+    """
+    org_id = get_org_id(current_user, organization_id)
+    service = TelemetryService(db)
+    
+    return service.get_latest_telemetry(
+        vehicle_id=vehicle_id,
+        organization_id=org_id
+    )

@@ -1,54 +1,27 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Index, JSON
-from sqlalchemy.orm import relationship
+import uuid
+from sqlalchemy import Column, Integer, Float, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base
 
-class IOTDevice(Base, TimestampMixin):
-    __tablename__ = "iot_devices"
+class VehicleTelemetry(Base):
+    """
+    High-throughput isolated table for vehicle telemetry.
+    Separated from the main Vehicle model to prevent transaction lock contention.
+    """
+    __tablename__ = "vehicle_telemetry"
 
-    id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True)
-    device_identifier = Column(String, unique=True, index=True, nullable=False) # UUID or Serial
-    device_type = Column(String, nullable=False) # GPS-Tracker, OBD-Scanner, Multi-Sensor
-    firmware_version = Column(String, nullable=True)
-    status = Column(String, default="active") # active, inactive, maintenance
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-class TelemetryEvent(Base):
-    __tablename__ = "telemetry_events"
-
-    id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
-    event_type = Column(String, nullable=False) # location, diagnostic, health, alert
-    telemetry_data = Column(JSON, nullable=False) # Raw sensor data payload
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehicle_id = Column(UUID(as_uuid=True), ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    speed_kmh = Column(Float, nullable=False, default=0.0)
+    fuel_level_percentage = Column(Float, nullable=False, default=0.0)
+    battery_voltage = Column(Float, nullable=False, default=0.0)
+    ignition_state = Column(Boolean, nullable=False, default=False)
+    
+    timestamp = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     __table_args__ = (
-        Index("ix_telemetry_vehicle_time", "vehicle_id", "created_at"),
+        Index("idx_vehicle_telemetry_org_vehicle_time", "organization_id", "vehicle_id", "timestamp"),
     )
-
-class SensorStream(Base):
-    __tablename__ = "sensor_streams"
-
-    id = Column(Integer, primary_key=True, index=True)
-    device_id = Column(Integer, ForeignKey("iot_devices.id"), nullable=False)
-    sensor_type = Column(String, nullable=False) # temperature, fuel, battery, rpm
-    sensor_value = Column(Float, nullable=False)
-    recorded_at = Column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        Index("ix_sensor_stream_device_type", "device_id", "sensor_type", "recorded_at"),
-    )
-
-class VehicleDiagnostic(Base):
-    __tablename__ = "vehicle_diagnostics"
-
-    id = Column(Integer, primary_key=True, index=True)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
-    engine_health = Column(String, default="ok")
-    battery_status = Column(String, default="good")
-    fuel_level = Column(Integer, default=100)
-    temperature = Column(Float, nullable=True)
-    diagnostic_code = Column(String, nullable=True) # OBD-II codes (e.g., P0123)
-    created_at = Column(DateTime, default=datetime.utcnow)

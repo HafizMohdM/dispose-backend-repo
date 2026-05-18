@@ -1,88 +1,190 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.core.permissions import require_permission
-from app.models.user import User
-from app.api.v1.vehicles.vehicle_schemas import VehicleCreate, VehicleResponse, VehicleAssignmentRequest, MaintenanceLogCreate
-from app.repositories.vehicle_repo import VehicleRepository
-from app.models.vehicle import Vehicle, MaintenanceLog
-from app.core.dependencies import get_user_org
-from typing import List
+
+from app.services.vehicle_service import VehicleService
+from app.api.v1.vehicles.vehicle_schemas import (
+    VehicleCreate,
+    VehicleResponse,
+    VehicleUpdate,
+    AssignDriverRequest,
+    VehicleAssignmentResponse,
+    VehicleMaintenanceCreate,
+    VehicleMaintenanceResponse,
+    FleetHealthResponse
+)
 
 router = APIRouter()
 
-@router.post("/", response_model=VehicleResponse, status_code=status.HTTP_201_CREATED)
-def add_vehicle(
+def get_org_id(current_user, request_org_id: Optional[int] = None) -> int:
+    org_id = request_org_id or getattr(current_user, "current_org_id", None)
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="organization_id is required. Admins must provide it in the request."
+        )
+    return org_id
+
+@router.post(
+    "",
+    response_model=VehicleResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_vehicle(
     request: VehicleCreate,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.manage"))
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
 ):
-    """
-    Onboards a new vehicle into the organization's fleet.
-    """
-    org = get_user_org(db, current_user)
-    vehicle = Vehicle(
-        organization_id=org.id,
-        **request.dict()
-    )
-    new_vehicle = VehicleRepository.create_vehicle(db, vehicle)
-    db.commit()
-    db.refresh(new_vehicle)
-    return new_vehicle
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.create_vehicle(org_id, request)
 
-@router.get("/", response_model=List[VehicleResponse])
+@router.get(
+    "",
+    response_model=List[VehicleResponse],
+)
 def list_vehicles(
+    skip: int = 0,
+    limit: int = 50,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.view"))
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.view")),
 ):
-    """
-    Returns the complete list of vehicles for the organization.
-    """
-    org = get_user_org(db, current_user)
-    return VehicleRepository.get_vehicles_by_org(db, org.id)
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.list_vehicles(org_id, skip, limit)
 
-@router.get("/{id}", response_model=VehicleResponse)
+@router.get(
+    "/health",
+    response_model=FleetHealthResponse,
+)
+def get_fleet_health(
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("fleet.view")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.get_fleet_health(org_id)
+
+@router.get(
+    "/maintenance",
+    response_model=List[VehicleMaintenanceResponse],
+)
+def list_maintenances(
+    skip: int = 0,
+    limit: int = 50,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.view")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.list_maintenances(org_id, skip, limit)
+
+@router.post(
+    "/{vehicle_id}/maintenance",
+    response_model=VehicleMaintenanceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_maintenance(
+    vehicle_id: UUID,
+    request: VehicleMaintenanceCreate,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.create_maintenance(vehicle_id, org_id, request)
+
+@router.get(
+    "/{vehicle_id}",
+    response_model=VehicleResponse,
+)
 def get_vehicle(
-    id: int,
+    vehicle_id: UUID,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.view"))
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.view")),
 ):
-    """
-    Returns details for a specific vehicle, including current health stats.
-    """
-    vehicle = VehicleRepository.get_vehicle_by_id(db, id)
-    if not vehicle:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
-    return vehicle
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.get_vehicle(vehicle_id, org_id)
 
-@router.post("/{id}/assign-driver")
+@router.patch(
+    "/{vehicle_id}",
+    response_model=VehicleResponse,
+)
+def update_vehicle(
+    vehicle_id: UUID,
+    request: VehicleUpdate,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.update_vehicle(vehicle_id, org_id, request)
+
+@router.delete(
+    "/{vehicle_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_vehicle(
+    vehicle_id: UUID,
+    organization_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
+):
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    service.delete_vehicle(vehicle_id, org_id)
+    return None
+
+@router.post(
+    "/{vehicle_id}/assign-driver",
+    response_model=VehicleAssignmentResponse,
+    status_code=status.HTTP_200_OK,
+)
 def assign_driver(
-    id: int,
-    request: VehicleAssignmentRequest,
+    vehicle_id: UUID,
+    request: AssignDriverRequest,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.manage"))
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
 ):
-    """
-    Assigns a driver to a vehicle. Automatically unassigns them from any other active vehicle.
-    """
-    VehicleRepository.assign_driver(db, id, request.driver_id)
-    db.commit()
-    return {"status": "assigned"}
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    return service.assign_driver(vehicle_id, request.driver_id, org_id)
 
-@router.post("/{id}/maintenance")
-def log_maintenance(
-    id: int,
-    request: MaintenanceLogCreate,
+@router.post(
+    "/{vehicle_id}/unassign-driver",
+    status_code=status.HTTP_200_OK,
+)
+def unassign_driver(
+    vehicle_id: UUID,
+    organization_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("fleet.manage"))
+    current_user=Depends(get_current_user),
+    _: bool = Depends(require_permission("vehicle.manage")),
 ):
-    """
-    Logs a maintenance event for a vehicle.
-    """
-    log = MaintenanceLog(
-        vehicle_id=id,
-        **request.dict()
-    )
-    VehicleRepository.create_maintenance_log(db, log)
-    db.commit()
-    return {"status": "log_created"}
+    org_id = get_org_id(current_user, organization_id)
+    service = VehicleService(db)
+    service.unassign_driver(vehicle_id, org_id)
+    return {"status": "success", "message": "Driver unassigned successfully"}

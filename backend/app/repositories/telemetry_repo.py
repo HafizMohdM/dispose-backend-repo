@@ -1,32 +1,30 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from app.models.telemetry import TelemetryEvent, SensorStream, VehicleDiagnostic, IOTDevice
+from uuid import UUID
 from typing import List, Optional
+from datetime import datetime
+
+from app.models.telemetry import VehicleTelemetry
 
 class TelemetryRepository:
-    
-    @staticmethod
-    def create_telemetry_event(db: Session, event: TelemetryEvent) -> TelemetryEvent:
-        db.add(event)
-        return event
+    def __init__(self, db: Session):
+        self.db = db
 
-    @staticmethod
-    def get_latest_diagnostics(db: Session, vehicle_id: int) -> Optional[VehicleDiagnostic]:
-        return db.query(VehicleDiagnostic).filter(
-            VehicleDiagnostic.vehicle_id == vehicle_id
-        ).order_by(VehicleDiagnostic.created_at.desc()).first()
+    def insert(self, telemetry: VehicleTelemetry) -> VehicleTelemetry:
+        self.db.add(telemetry)
+        self.db.commit()
+        self.db.refresh(telemetry)
+        return telemetry
 
-    @staticmethod
-    def get_sensor_history(db: Session, device_id: int, sensor_type: str, limit: int = 100) -> List[SensorStream]:
-        return db.query(SensorStream).filter(
-            and_(SensorStream.device_id == device_id, SensorStream.sensor_type == sensor_type)
-        ).order_by(SensorStream.recorded_at.desc()).limit(limit).all()
+    def get_latest_for_vehicle(self, vehicle_id: UUID, organization_id: int) -> Optional[VehicleTelemetry]:
+        return self.db.query(VehicleTelemetry).filter(
+            VehicleTelemetry.vehicle_id == vehicle_id,
+            VehicleTelemetry.organization_id == organization_id
+        ).order_by(VehicleTelemetry.timestamp.desc()).first()
 
-    @staticmethod
-    def create_diagnostic_snapshot(db: Session, diag: VehicleDiagnostic) -> VehicleDiagnostic:
-        db.add(diag)
-        return diag
-
-    @staticmethod
-    def get_device_by_identifier(db: Session, identifier: str) -> Optional[IOTDevice]:
-        return db.query(IOTDevice).filter(IOTDevice.device_identifier == identifier).first()
+    def get_history_for_vehicle(
+        self, vehicle_id: UUID, organization_id: int, limit: int = 100
+    ) -> List[VehicleTelemetry]:
+        return self.db.query(VehicleTelemetry).filter(
+            VehicleTelemetry.vehicle_id == vehicle_id,
+            VehicleTelemetry.organization_id == organization_id
+        ).order_by(VehicleTelemetry.timestamp.desc()).limit(limit).all()

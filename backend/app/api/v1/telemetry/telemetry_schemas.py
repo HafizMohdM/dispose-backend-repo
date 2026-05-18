@@ -1,29 +1,19 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
+from uuid import UUID
 from datetime import datetime
-from typing import List, Optional, Any
 
 class TelemetryIngestRequest(BaseModel):
-    device_identifier: str
-    type: str # diagnostic, health, alert
-    engine_health: Optional[str] = "ok"
-    battery_status: Optional[str] = "good"
-    fuel_level: Optional[int] = 100
-    temperature: Optional[float] = None
-    diagnostic_code: Optional[str] = None
-    additional_data: Optional[dict] = None
+    speed_kmh: float = Field(..., ge=0.0, description="Current speed in km/h")
+    fuel_level_percentage: float = Field(..., ge=0.0, le=100.0, description="Fuel level percentage (0-100)")
+    battery_voltage: float = Field(..., ge=0.0, description="Battery voltage")
+    ignition_state: bool = Field(..., description="Ignition state (True = ON, False = OFF)")
+    timestamp: Optional[datetime] = Field(default_factory=datetime.utcnow, description="Time of reading")
 
-class DiagnosticResponse(BaseModel):
-    vehicle_id: int
-    engine_health: str
-    battery_status: str
-    fuel_level: int
-    temperature: Optional[float]
-    diagnostic_code: Optional[str]
-    created_at: datetime
+class TelemetryResponse(TelemetryIngestRequest):
+    id: UUID
+    organization_id: int
+    vehicle_id: UUID
 
     class Config:
         from_attributes = True
-
-class TelemetryHistoryResponse(BaseModel):
-    vehicle_id: int
-    events: List[Any] # Raw JSON events

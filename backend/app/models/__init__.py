@@ -19,9 +19,12 @@ from .organization_member import OrganizationMember, MembershipStatus
 from .analytics import AnalyticsEvent, DailyMetric, PickupMetric, DriverMetric, RevenueMetric
 from .materialized_metrics import HourlyMetric, WeeklyMetric, MonthlyMetric
 from .recurring_pickup import RecurringPickup, RecurringFrequency
-from .sustainability import SustainabilityMetric, ESGGoal
+from .sustainability import SustainabilityMetric, ESGGoal, EcoGoal
 from .fleet import GPSHistory, DriverTrackingSession, LiveDriverLocation, RouteSession, DriverRoute, MapEvent
-from .vehicle import Vehicle, VehicleAssignment, VehicleHealth, MaintenanceLog
-from .telemetry import IOTDevice, TelemetryEvent, SensorStream, VehicleDiagnostic
+from .vehicle import Vehicle, VehicleAssignment, VehicleStatus, VehicleMaintenance
+from .telemetry import VehicleTelemetry
 from .route_optimization import OptimizedRoute, RouteWaypoint
 from .system_setting import SystemSetting
+from .trip import Trip, TripStop
+from .driver_operations import DriverShift, DriverDocument
+from .incident import Incident

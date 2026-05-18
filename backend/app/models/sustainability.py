@@ -52,3 +52,30 @@ class ESGGoal(Base, TimestampMixin):
     status = Column(String(20), default="active") # active, achieved, failed
 
     organization = relationship("Organization")
+
+import enum
+from sqlalchemy import Enum, Boolean
+
+class MetricType(str, enum.Enum):
+    CO2_SAVED = "CO2_SAVED"
+    WASTE_DIVERTED = "WASTE_DIVERTED"
+    CLEAN_ENERGY = "CLEAN_ENERGY"
+    ACTIVE_VEHICLES = "ACTIVE_VEHICLES"
+
+class EcoGoal(Base):
+    __tablename__ = "eco_goals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    title = Column(String(255), nullable=False)
+    target_value = Column(Float, nullable=False)
+    current_value = Column(Float, default=0.0)
+    
+    metric_type = Column(
+        Enum(MetricType, native_enum=False, length=50),
+        nullable=False
+    )
+    
+    is_completed = Column(Boolean, default=False, nullable=False)
+    deadline = Column(DateTime, nullable=True)

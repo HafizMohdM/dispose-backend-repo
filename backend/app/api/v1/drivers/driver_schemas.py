@@ -3,7 +3,8 @@ from typing import Optional,List
 from uuid import UUID
 from pydantic import BaseModel,Field,EmailStr
 
-from app.utils.enums import DriverStatus,DriverAvailabilityStatus
+from app.utils.enums import DriverStatus, DriverAvailabilityStatus
+from app.models.driver_operations import ShiftStatus, DocumentVerificationStatus
 
 
 class DriverCreateRequest(BaseModel):
@@ -57,4 +58,36 @@ class DriverLocationUpdateRequest(BaseModel):
 class DriverListResponse(BaseModel):
     drivers: List[DriverResponse]
     total: int
+
+class DriverShiftResponse(BaseModel):
+    id: UUID
+    driver_id: UUID
+    organization_id: int
+    clock_in_time: datetime
+    clock_out_time: Optional[datetime]
+    status: ShiftStatus
+
+    class Config:
+        from_attributes = True
+
+class DriverDocumentCreate(BaseModel):
+    document_type: str = Field(..., max_length=100)
+    file_url: str = Field(..., max_length=500)
+
+class DriverDocumentResponse(BaseModel):
+    id: UUID
+    driver_id: UUID
+    document_type: str
+    file_url: str
+    verification_status: DocumentVerificationStatus
+    rejection_reason: Optional[str]
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+class DocumentVerifyRequest(BaseModel):
+    status: DocumentVerificationStatus
+    rejection_reason: Optional[str] = None
 

@@ -1,63 +1,77 @@
-from sqlalchemy.orm import Session
-from app.repositories.telemetry_repo import TelemetryRepository
-from app.models.telemetry import TelemetryEvent, VehicleDiagnostic
-from app.core.pubsub import pubsub_service
-from datetime import datetime
-import asyncio
 import logging
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException, status
+from uuid import UUID
+
+from app.models.telemetry import VehicleTelemetry
+from app.api.v1.telemetry.telemetry_schemas import TelemetryIngestRequest
+from app.repositories.telemetry_repo import TelemetryRepository
+from app.core.pubsub import pubsub_service
 
 logger = logging.getLogger(__name__)
 
 class TelemetryService:
-    
-    @staticmethod
-    async def ingest_data(db: Session, device_id: int, vehicle_id: int, org_id: int, data: dict):
-        # 1. Store Raw Telemetry Event
-        event = TelemetryEvent(
+    def __init__(self, db: Session):
+        self.db = db
+        self.telemetry_repo = TelemetryRepository(db)
+
+    async def ingest_telemetry(self, vehicle_id: UUID, organization_id: int, payload: TelemetryIngestRequest) -> VehicleTelemetry:
+        telemetry = VehicleTelemetry(
+            organization_id=organization_id,
             vehicle_id=vehicle_id,
-            organization_id=org_id,
-            event_type=data.get("type", "diagnostic"),
-            telemetry_data=data
+            speed_kmh=payload.speed_kmh,
+            fuel_level_percentage=payload.fuel_level_percentage,
+            battery_voltage=payload.battery_voltage,
+            ignition_state=payload.ignition_state,
+            timestamp=payload.timestamp
         )
-        TelemetryRepository.create_telemetry_event(db, event)
 
-        # 2. Update Vehicle Diagnostic Snapshot
-        # If the data contains health metrics, update the snapshot
-        if "engine_health" in data or "fuel_level" in data:
-            diag = VehicleDiagnostic(
-                vehicle_id=vehicle_id,
-                engine_health=data.get("engine_health", "ok"),
-                battery_status=data.get("battery_status", "good"),
-                fuel_level=data.get("fuel_level", 100),
-                temperature=data.get("temperature"),
-                diagnostic_code=data.get("diagnostic_code")
+        try:
+            inserted_telemetry = self.telemetry_repo.insert(telemetry)
+        except IntegrityError as e:
+            self.db.rollback()
+            logger.error(f"IntegrityError during telemetry ingestion: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Vehicle not found or constraint violation."
             )
-            TelemetryRepository.create_diagnostic_snapshot(db, diag)
-        
-        db.commit()
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Unexpected error during telemetry ingestion: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal server error while saving telemetry."
+            )
 
-        # 3. Broadcast Realtime Telemetry
-        asyncio.create_task(pubsub_service.publish(
-            f"telemetry:vehicle_{vehicle_id}",
-            {
-                "event": "telemetry_update",
-                "vehicle_id": vehicle_id,
-                "organization_id": org_id,
-                "timestamp": datetime.utcnow().isoformat(),
-                "data": data
+        # Publish state propagation
+        pubsub_payload = {
+            "type": "telemetry_update",
+            "organization_id": organization_id,
+            "vehicle_id": str(vehicle_id),
+            "telemetry": {
+                "id": str(inserted_telemetry.id),
+                "speed_kmh": inserted_telemetry.speed_kmh,
+                "fuel_level_percentage": inserted_telemetry.fuel_level_percentage,
+                "battery_voltage": inserted_telemetry.battery_voltage,
+                "ignition_state": inserted_telemetry.ignition_state,
+                "timestamp": inserted_telemetry.timestamp.isoformat()
             }
-        ))
-        
-        # Also broadcast to org-level fleet channel for dashboard gauges
-        asyncio.create_task(pubsub_service.publish(
-            f"fleet:org_{org_id}",
-            {
-                "event": "vehicle_health_update",
-                "vehicle_id": vehicle_id,
-                "data": {
-                    "fuel": data.get("fuel_level"),
-                    "engine": data.get("engine_health"),
-                    "temp": data.get("temperature")
-                }
-            }
-        ))
+        }
+
+        try:
+            # publish the payload via existing pubsub_service
+            await pubsub_service.publish(channel=f"org_{organization_id}", message=pubsub_payload)
+        except Exception as e:
+            logger.warning(f"Failed to publish telemetry to pubsub: {e}")
+
+        return inserted_telemetry
+
+    def get_latest_telemetry(self, vehicle_id: UUID, organization_id: int) -> VehicleTelemetry:
+        telemetry = self.telemetry_repo.get_latest_for_vehicle(vehicle_id, organization_id)
+        if not telemetry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No telemetry data found for this vehicle."
+            )
+        return telemetry

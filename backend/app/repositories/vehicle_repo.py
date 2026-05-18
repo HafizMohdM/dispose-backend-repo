@@ -1,55 +1,61 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from app.models.vehicle import Vehicle, VehicleAssignment, VehicleHealth, MaintenanceLog
+from uuid import UUID
 from typing import List, Optional
+from app.models.vehicle import Vehicle, VehicleAssignment, VehicleStatus
 
 class VehicleRepository:
-    
-    @staticmethod
-    def create_vehicle(db: Session, vehicle: Vehicle) -> Vehicle:
-        db.add(vehicle)
-        # Initialize empty health record
-        db.flush()
-        health = VehicleHealth(vehicle_id=vehicle.id)
-        db.add(health)
-        return vehicle
+    def __init__(self, db: Session):
+        self.db = db
 
-    @staticmethod
-    def get_vehicles_by_org(db: Session, organization_id: int) -> List[Vehicle]:
-        return db.query(Vehicle).filter(Vehicle.organization_id == organization_id).all()
-
-    @staticmethod
-    def get_vehicle_by_id(db: Session, vehicle_id: int) -> Optional[Vehicle]:
-        return db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
-
-    @staticmethod
-    def assign_driver(db: Session, vehicle_id: int, driver_id: int):
-        # 1. Deactivate current active assignments for this vehicle
-        db.query(VehicleAssignment).filter(
-            and_(VehicleAssignment.vehicle_id == vehicle_id, VehicleAssignment.is_active == True)
-        ).update({"is_active": False, "unassigned_at": datetime.utcnow()})
-        
-        # 2. Deactivate any active vehicle assignments for this driver
-        db.query(VehicleAssignment).filter(
-            and_(VehicleAssignment.driver_id == driver_id, VehicleAssignment.is_active == True)
-        ).update({"is_active": False, "unassigned_at": datetime.utcnow()})
-        
-        # 3. Create new assignment
-        assignment = VehicleAssignment(
-            vehicle_id=vehicle_id,
-            driver_id=driver_id,
-            is_active=True
-        )
-        db.add(assignment)
-        return assignment
-
-    @staticmethod
-    def get_active_assignment(db: Session, driver_id: int) -> Optional[VehicleAssignment]:
-        return db.query(VehicleAssignment).filter(
-            and_(VehicleAssignment.driver_id == driver_id, VehicleAssignment.is_active == True)
+    def get_by_id(self, vehicle_id: UUID, organization_id: int) -> Optional[Vehicle]:
+        return self.db.query(Vehicle).filter(
+            Vehicle.id == vehicle_id,
+            Vehicle.organization_id == organization_id
         ).first()
 
-    @staticmethod
-    def create_maintenance_log(db: Session, log: MaintenanceLog) -> MaintenanceLog:
-        db.add(log)
-        return log
+    def get_by_registration_number(self, registration_number: str, organization_id: int) -> Optional[Vehicle]:
+        return self.db.query(Vehicle).filter(
+            Vehicle.registration_number == registration_number,
+            Vehicle.organization_id == organization_id
+        ).first()
+
+    def get_all(self, organization_id: int, skip: int = 0, limit: int = 100) -> List[Vehicle]:
+        return self.db.query(Vehicle).filter(
+            Vehicle.organization_id == organization_id,
+            Vehicle.status != VehicleStatus.DELETED
+        ).offset(skip).limit(limit).all()
+
+    def create(self, vehicle: Vehicle) -> Vehicle:
+        self.db.add(vehicle)
+        self.db.commit()
+        self.db.refresh(vehicle)
+        return vehicle
+
+    def update(self, vehicle: Vehicle) -> Vehicle:
+        self.db.commit()
+        self.db.refresh(vehicle)
+        return vehicle
+
+    def soft_delete(self, vehicle: Vehicle) -> Vehicle:
+        vehicle.status = VehicleStatus.DELETED
+        self.db.commit()
+        self.db.refresh(vehicle)
+        return vehicle
+
+    def get_active_assignment(self, vehicle_id: UUID) -> Optional[VehicleAssignment]:
+        return self.db.query(VehicleAssignment).filter(
+            VehicleAssignment.vehicle_id == vehicle_id,
+            VehicleAssignment.is_active == True
+        ).first()
+
+    def get_active_assignment_by_driver(self, driver_id: UUID) -> Optional[VehicleAssignment]:
+        return self.db.query(VehicleAssignment).filter(
+            VehicleAssignment.driver_id == driver_id,
+            VehicleAssignment.is_active == True
+        ).first()
+
+    def create_assignment(self, assignment: VehicleAssignment) -> VehicleAssignment:
+        self.db.add(assignment)
+        self.db.commit()
+        self.db.refresh(assignment)
+        return assignment
